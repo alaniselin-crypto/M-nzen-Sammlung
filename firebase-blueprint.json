@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "coins": {
+      "title": "Coins & Banknotes",
+      "description": "User numismatic collection items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "catalogNumber": { "type": "string" },
+        "itemType": { "type": "string" },
+        "quantity": { "type": "number" },
+        "rarity": { "type": "string" },
+        "storageLocation": { "type": "string" },
+        "name": { "type": "string" },
+        "country": { "type": "string" },
+        "faceValue": { "type": "string" },
+        "currency": { "type": "string" },
+        "year": { "type": "number" },
+        "condition": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "currentValue": { "type": "number" },
+        "purchaseDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "mintMark": { "type": "string" },
+        "material": { "type": "string" },
+        "weight": { "type": "string" },
+        "diameter": { "type": "string" },
+        "mintage": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "reverseImageUrl": { "type": "string" },
+        "isFavorite": { "type": "boolean" },
+        "isForSale": { "type": "boolean" },
+        "listingPlatform": { "type": "string" },
+        "listingPrice": { "type": "number" },
+        "listingUrl": { "type": "string" },
+        "isSold": { "type": "boolean" },
+        "soldPrice": { "type": "number" },
+        "soldDate": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "name"]
+    },
+    "userSettings": {
+      "title": "User Custom Folders and Platforms Settings",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "folders": { "type": "array", "items": { "type": "string" } },
+        "platforms": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId"]
+    }
+  },
+  "securityRules": [
+    {
+      "collection": "coins",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == resource.data.userId",
+        "create": "request.auth != null && request.auth.uid == request.resource.data.userId",
+        "update": "request.auth != null && request.auth.uid == resource.data.userId && request.auth.uid == request.resource.data.userId",
+        "delete": "request.auth != null && request.auth.uid == resource.data.userId"
+      }
+    },
+    {
+      "collection": "userSettings",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == resource.data.userId",
+        "create": "request.auth != null && request.auth.uid == request.resource.data.userId",
+        "update": "request.auth != null && request.auth.uid == resource.data.userId && request.auth.uid == request.resource.data.userId",
+        "delete": "request.auth != null && request.auth.uid == resource.data.userId"
+      }
+    }
+  ]
+}
