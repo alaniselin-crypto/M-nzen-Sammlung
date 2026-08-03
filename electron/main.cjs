@@ -1,22 +1,29 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  const iconPath = path.join(__dirname, '../dist/favicon.ico');
+  
+  const windowConfig = {
     width: 1280,
     height: 850,
     minWidth: 960,
     minHeight: 640,
-    title: 'Numisma - Münzsammlung Manager v1.0',
-    icon: path.join(__dirname, '../public/icon.png'),
+    title: 'Numisma - Münzsammlung Manager',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
     },
-    titleBarStyle: 'hiddenInset',
     show: false,
-  });
+  };
+
+  if (fs.existsSync(iconPath)) {
+    windowConfig.icon = iconPath;
+  }
+
+  const mainWindow = new BrowserWindow(windowConfig);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
