@@ -12,21 +12,21 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
     },
     show: false,
   });
-
-  const iconPath = path.join(__dirname, '../dist/favicon.ico');
-  if (fs.existsSync(iconPath)) {
-    mainWindow.setIcon(iconPath);
-  }
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
 
   const indexPath = path.join(__dirname, '../dist/index.html');
-  mainWindow.loadFile(indexPath);
+  if (fs.existsSync(indexPath)) {
+    mainWindow.loadFile(indexPath);
+  } else {
+    console.log('Loading local fallback or dev server...');
+  }
 }
 
 app.whenReady().then(() => {
@@ -44,4 +44,3 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
-
