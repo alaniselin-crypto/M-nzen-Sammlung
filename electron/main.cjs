@@ -2,9 +2,12 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// Prevent GPU / sandbox crashes on macOS ARM64 for unsigned builds
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-gpu');
+
 function createWindow() {
-  const iconPath = path.join(__dirname, '../dist/favicon.ico');
-  
   const windowConfig = {
     width: 1280,
     height: 850,
@@ -14,11 +17,12 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      sandbox: false,
     },
     show: false,
   };
 
+  const iconPath = path.join(__dirname, '../dist/favicon.ico');
   if (fs.existsSync(iconPath)) {
     windowConfig.icon = iconPath;
   }
