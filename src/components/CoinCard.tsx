@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Star, Eye, Edit2, Trash2, TrendingUp, TrendingDown, MapPin, Calendar, Scale, Sparkles, RefreshCw, Copy, Folder, Hash, ShoppingBag, Tag, CheckCircle2, Banknote, Coins, Layers, Crown } from 'lucide-react';
 import { Coin } from '../types';
+import { CoinAvatar } from './CoinAvatar';
 import { formatCurrency, getConditionLabel } from '../utils/storage';
 import { getRarityOption } from '../data/rarities';
 
@@ -29,10 +30,10 @@ export const CoinCard: React.FC<CoinCardProps> = ({
   const profitMargin = coin.purchasePrice > 0 ? (profit / coin.purchasePrice) * 100 : 0;
   const isPositive = profit >= 0;
 
-  const currentDisplayImage = showReverse && coin.reverseImageUrl ? coin.reverseImageUrl : coin.imageUrl;
-  const hasBothImages = Boolean(coin.imageUrl && coin.reverseImageUrl);
+  const currentDisplayImage = showReverse && coin.reverseImageUrl ? coin.reverseImageUrl : (coin.imageUrl || coin.reverseImageUrl);
+  const hasBothImages = Boolean(coin.imageUrl && coin.reverseImageUrl && coin.imageUrl !== coin.reverseImageUrl);
   const rarityOpt = getRarityOption(coin.rarity);
-  const isBanknote = coin.itemType === 'banknote';
+  const isBanknote = coin.itemType === 'banknote' || /banknote|schein|note|papier/i.test(coin.name + ' ' + (coin.material || '') + ' ' + (coin.notes || ''));
   const quantity = coin.quantity || 1;
 
   // Placeholder fallback styling based on material
@@ -52,43 +53,41 @@ export const CoinCard: React.FC<CoinCardProps> = ({
 
   if (viewMode === 'table') {
     return (
-      <tr className="hover:bg-slate-800/40 transition-colors border-b border-slate-800/60 text-xs sm:text-sm">
+      <tr className="hover:bg-[#2b211a] transition-colors border-b border-[#3a2c24] text-xs sm:text-sm">
         <td className="py-3 px-3">
           <button
             onClick={() => onToggleFavorite(coin.id)}
-            className="p-1 hover:text-amber-400 text-slate-500 transition-colors"
+            className="p-1 hover:text-amber-400 text-stone-500 transition-colors"
             title={coin.isFavorite ? 'Favorit entfernen' : 'Zu Favoriten hinzufügen'}
           >
             <Star className={`w-4 h-4 ${coin.isFavorite ? 'text-amber-400 fill-amber-400' : ''}`} />
           </button>
         </td>
-        <td className="py-3 px-3 font-medium text-slate-100">
+        <td className="py-3 px-3 font-medium text-stone-100">
           <div className="flex items-center gap-2">
-            {currentDisplayImage ? (
-              <div className="relative group/thumb">
-                <img
-                  src={currentDisplayImage}
-                  alt={`${coin.name} (${showReverse ? 'Rückseite' : 'Vorderseite'})`}
-                  className="w-8 h-8 rounded-full object-cover border border-slate-700 cursor-pointer"
-                  onClick={() => hasBothImages && setShowReverse(!showReverse)}
-                />
-                {hasBothImages && (
-                  <button
-                    onClick={() => setShowReverse(!showReverse)}
-                    className="absolute -top-1 -right-1 bg-slate-900 border border-amber-500/80 rounded-full p-0.5 text-amber-400 hover:scale-110 transition-transform"
-                    title={showReverse ? 'Zur Vorderseite (Avers)' : 'Zur Rückseite (Revers)'}
-                  >
-                    <RefreshCw className="w-2.5 h-2.5" />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-slate-800 border border-amber-500/30 flex items-center justify-center font-serif text-amber-400 text-xs font-bold">
-                {coin.faceValue}
-              </div>
-            )}
+            <div className="relative group/thumb shrink-0">
+              <CoinAvatar
+                imageUrl={currentDisplayImage}
+                name={coin.name}
+                faceValue={coin.faceValue}
+                currency={coin.currency}
+                material={coin.material}
+                isBanknote={isBanknote}
+                size="sm"
+                onClick={() => hasBothImages && setShowReverse(!showReverse)}
+              />
+              {hasBothImages && (
+                <button
+                  onClick={() => setShowReverse(!showReverse)}
+                  className="absolute -top-1 -right-1 bg-[#1a1412] border border-amber-500/80 rounded-full p-0.5 text-amber-400 hover:scale-110 transition-transform"
+                  title={showReverse ? 'Zur Vorderseite (Avers)' : 'Zur Rückseite (Revers)'}
+                >
+                  <RefreshCw className="w-2.5 h-2.5" />
+                </button>
+              )}
+            </div>
             <div>
-              <div className="font-semibold text-slate-200 line-clamp-1 flex items-center gap-1.5">
+              <div className="font-semibold text-stone-100 line-clamp-1 flex items-center gap-1.5">
                 {coin.catalogNumber && (
                   <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded">
                     #{coin.catalogNumber}
@@ -101,7 +100,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                   </span>
                 )}
               </div>
-              <div className="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap mt-0.5">
+              <div className="text-[11px] text-stone-400 flex items-center gap-1.5 flex-wrap mt-0.5">
                 <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-1 ${
                   isBanknote ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                 }`}>
@@ -134,7 +133,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             {cond.label}
           </span>
         </td>
-        <td className="py-3 px-3 font-mono text-slate-300">
+        <td className="py-3 px-3 font-mono text-stone-300">
           {formatCurrency(coin.purchasePrice)}
         </td>
         <td className="py-3 px-3 font-mono font-bold text-amber-400">
@@ -150,14 +149,14 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => onViewDetails(coin)}
-              className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-amber-300 transition-colors"
+              className="p-1.5 rounded hover:bg-[#3d2e26] text-stone-400 hover:text-amber-300 transition-colors"
               title="Details anzeigen"
             >
               <Eye className="w-4 h-4" />
             </button>
             <button
               onClick={() => onEdit(coin)}
-              className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-amber-300 transition-colors"
+              className="p-1.5 rounded hover:bg-[#3d2e26] text-stone-400 hover:text-amber-300 transition-colors"
               title="Bearbeiten"
             >
               <Edit2 className="w-4 h-4" />
@@ -165,7 +164,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             {onDuplicate && (
               <button
                 onClick={() => onDuplicate(coin)}
-                className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-amber-300 transition-colors"
+                className="p-1.5 rounded hover:bg-[#3d2e26] text-stone-400 hover:text-amber-300 transition-colors"
                 title="Münze duplizieren / kopieren"
               >
                 <Copy className="w-4 h-4 text-amber-400" />
@@ -173,7 +172,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             )}
             <button
               onClick={() => onDelete(coin.id)}
-              className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-rose-400 transition-colors"
+              className="p-1.5 rounded hover:bg-[#3d2e26] text-stone-400 hover:text-rose-400 transition-colors"
               title="Löschen"
             >
               <Trash2 className="w-4 h-4" />
@@ -185,7 +184,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
   }
 
   return (
-    <div className="group relative bg-gradient-to-b from-[#1c1e26] to-[#15171f] hover:from-[#222530] hover:to-[#181a24] border border-slate-800/80 hover:border-amber-500/40 rounded-2xl p-4 transition-all duration-300 shadow-md hover:shadow-xl hover:shadow-amber-500/5 flex flex-col justify-between">
+    <div className="group relative bg-gradient-to-b from-[#271e19] to-[#1e1713] hover:from-[#2e231d] hover:to-[#221a15] border border-[#3e2e25] hover:border-amber-500/50 rounded-2xl p-4 transition-all duration-300 shadow-md hover:shadow-xl hover:shadow-amber-950/40 flex flex-col justify-between">
         {/* Top Banner & Action */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-3">
@@ -204,7 +203,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             {onDuplicate && (
               <button
                 onClick={() => onDuplicate(coin)}
-                className="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-amber-300 transition-all"
+                className="p-1.5 rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-300 transition-all"
                 title="Münze duplizieren / kopieren"
               >
                 <Copy className="w-4 h-4" />
@@ -212,7 +211,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             )}
             <button
               onClick={() => onToggleFavorite(coin.id)}
-              className="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition-all"
+              className="p-1.5 rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-400 transition-all"
               title={coin.isFavorite ? 'Favorit entfernen' : 'Zu Favoriten hinzufügen'}
             >
               <Star className={`w-4 h-4 ${coin.isFavorite ? 'text-amber-400 fill-amber-400' : ''}`} />
@@ -221,41 +220,36 @@ export const CoinCard: React.FC<CoinCardProps> = ({
         </div>
 
         {/* Center Coin Visual Header */}
-        <div className="flex items-center gap-4 mb-3.5">
+        <div className="flex items-center gap-3.5 mb-3.5">
           <div className="relative shrink-0 group/imgContainer">
-            {currentDisplayImage ? (
-              <div className="relative">
-                <img
-                  src={currentDisplayImage}
-                  alt={`${coin.name} (${showReverse ? 'Rückseite' : 'Vorderseite'})`}
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-2 border-amber-500/50 shadow-lg shadow-amber-900/20 transition-all duration-300 group-hover:scale-105 cursor-pointer"
-                  onClick={() => hasBothImages && setShowReverse(!showReverse)}
-                />
-                {hasBothImages && (
-                  <button
-                    onClick={() => setShowReverse(!showReverse)}
-                    className="absolute -top-1 -right-1 z-10 p-1.5 rounded-full bg-slate-900/95 border border-amber-400 text-amber-300 hover:text-amber-200 hover:scale-110 shadow-md transition-all"
-                    title={showReverse ? 'Zur Vorderseite (Avers)' : 'Zur Rückseite (Revers)'}
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 bg-slate-950/85 border border-slate-700 text-[10px] px-1.5 py-0.5 rounded-full text-slate-200 font-mono pointer-events-none shadow-md">
+            <div className="relative">
+              <CoinAvatar
+                imageUrl={currentDisplayImage}
+                name={coin.name}
+                faceValue={coin.faceValue}
+                currency={coin.currency}
+                material={coin.material}
+                isBanknote={isBanknote}
+                size="md"
+                onClick={() => hasBothImages && setShowReverse(!showReverse)}
+              />
+              {hasBothImages && (
+                <button
+                  onClick={() => setShowReverse(!showReverse)}
+                  className="absolute -top-1 -right-1 z-10 p-1 rounded-full bg-[#1a1412]/95 border border-amber-400 text-amber-300 hover:text-amber-200 hover:scale-110 shadow-md transition-all"
+                  title={showReverse ? 'Zur Vorderseite (Avers)' : 'Zur Rückseite (Revers)'}
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              )}
+              {currentDisplayImage && (
+                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 bg-[#140f0d]/90 border border-[#3e2e25] text-[9px] px-1.5 py-0.2 rounded-full text-stone-200 font-mono pointer-events-none shadow-md">
                   {showReverse && coin.reverseImageUrl ? 'Revers' : 'Avers'}
                 </span>
-              </div>
-            ) : (
-              <div className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br ${getMaterialGradient(coin.material)} border-2 flex flex-col items-center justify-center text-center p-2 shadow-md group-hover:scale-105 transition-transform duration-300`}>
-                <span className="font-serif font-bold text-base sm:text-lg tracking-tight text-amber-200">
-                  {coin.faceValue}
-                </span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-300 opacity-90 line-clamp-1">
-                  {coin.currency}
-                </span>
-              </div>
-            )}
+              )}
+            </div>
             {coin.mintMark && (
-              <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-slate-900 border border-amber-500/80 rounded-full flex items-center justify-center text-[10px] font-bold text-amber-400 z-10 shadow-md">
+              <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#1a1412] border border-amber-500/80 rounded-full flex items-center justify-center text-[10px] font-bold text-amber-400 z-10 shadow-md">
                 {coin.mintMark}
               </span>
             )}

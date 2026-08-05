@@ -58,14 +58,14 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({ coins }) => {
   }));
 
   return (
-    <div className="space-y-8 animate-fadeIn pb-12">
+    <div className="space-y-8 animate-fadeIn pb-12 max-w-full overflow-x-hidden">
       {/* Title Header */}
-      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-lg">
-        <h2 className="text-xl sm:text-2xl font-bold font-serif text-slate-100 flex items-center gap-2">
+      <div className="bg-[#241c18] border border-[#3e2e26] rounded-2xl p-6 shadow-lg">
+        <h2 className="text-xl sm:text-2xl font-bold font-serif text-stone-100 flex items-center gap-2">
           <BarChart3 className="w-6 h-6 text-amber-400" />
           Tiefenanalyse der Münzsammlung
         </h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <p className="text-xs text-stone-400 mt-1">
           Visualisierte Auswertungen zu Materialverteilung, Epochen und finanziellen Vergleichen.
         </p>
       </div>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Save, Upload, Sparkles, AlertCircle, Folder, Settings, Hash, Globe, Eye, Lock, Tag, ShoppingBag, ExternalLink, Banknote, Coins, Layers, Crown } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Save, Upload, Sparkles, AlertCircle, Folder, Settings, Hash, Globe, Eye, Lock, Tag, ShoppingBag, ExternalLink, Banknote, Coins, Layers, Crown, Loader2, CheckCircle2 } from 'lucide-react';
 import { Coin, CoinCondition } from '../types';
 import { WORLD_COUNTRIES, POPULAR_COIN_COUNTRIES } from '../data/countries';
 import { POPULAR_CURRENCIES } from '../data/currencies';
@@ -18,79 +18,9 @@ interface CoinFormModalProps {
 }
 
 const CONDITION_OPTIONS: { value: CoinCondition; label: string }[] = [
-  { value: 'PP', label: 'PP - Polierte Platte (Proof)' },
-  { value: 'stgl', label: 'stgl - Stempelglanz (Uncirculated)' },
-  { value: 'vz', label: 'vz - Vorzüglich (Extremely Fine)' },
-  { value: 'ss', label: 'ss - Sehr schön (Very Fine)' },
-  { value: 's', label: 's - Schön (Fine)' },
-  { value: 'ge', label: 'ge - Gering erhalten (Fair/Good)' }
-];
-
-const PRESETS = [
-  {
-    title: '5 Franken Vreneli Gold',
-    data: {
-      name: 'Schweiz 20 Franken Vreneli Gold',
-      country: 'Schweiz',
-      faceValue: '20',
-      currency: 'CHF',
-      year: 1935,
-      condition: 'vz' as CoinCondition,
-      purchasePrice: 380.00,
-      currentValue: 460.00,
-      material: 'Gold (900/1000)',
-      weight: '6.45 g (5.81g Feingold)',
-      diameter: '21.0 mm'
-    }
-  },
-  {
-    title: '2 Euro Gedenkmünze',
-    data: {
-      name: '2 Euro Sonderprägung Deutschland',
-      country: 'Deutschland',
-      faceValue: '2',
-      currency: 'EUR',
-      year: new Date().getFullYear(),
-      condition: 'stgl' as CoinCondition,
-      purchasePrice: 2.00,
-      currentValue: 6.50,
-      material: 'Bimetall (Kupfer-Nickel)',
-      weight: '8.50 g',
-      diameter: '25.75 mm'
-    }
-  },
-  {
-    title: 'Krügerrand 1 oz Gold',
-    data: {
-      name: 'Südafrika Krügerrand 1 oz Gold',
-      country: 'Südafrika',
-      faceValue: '1',
-      currency: 'Unze Gold',
-      year: 2024,
-      condition: 'stgl' as CoinCondition,
-      purchasePrice: 2200.00,
-      currentValue: 2450.00,
-      material: 'Gold (916.6/1000)',
-      weight: '33.93 g',
-      diameter: '32.77 mm'
-    }
-  },
-  {
-    title: '1 Unze Silber Anlagemünze',
-    data: {
-      name: 'Wiener Philharmoniker 1 oz Silber',
-      country: 'Österreich',
-      faceValue: '1.50',
-      currency: 'EUR',
-      year: 2023,
-      condition: 'stgl' as CoinCondition,
-      purchasePrice: 26.00,
-      currentValue: 32.00,
-      material: 'Silber (999/1000)',
-      weight: '31.10 g (1 oz)',
-      diameter: '37.0 mm'
-    }
-  }
+  { value: 'ss', label: 'SS - Sehr schön' },
+  { value: 'vz', label: 'VZ - Vorzüglich' },
+  { value: 'stgl', label: 'UNZ - Unzirkuliert / Stempelglanz' }
 ];
 
 export const CoinFormModal: React.FC<CoinFormModalProps> = ({
@@ -214,25 +144,114 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
     setErrors({});
   }, [initialCoin, nextCatalogNumber, isOpen]);
 
-  if (!isOpen) return null;
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [isAiNotesGenerating, setIsAiNotesGenerating] = useState(false);
+  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+  const [uploadingField, setUploadingField] = useState<'imageUrl' | 'reverseImageUrl' | null>(null);
+
+  const handleAiGenerate = async () => {
+    setIsAiGenerating(true);
+    setAiSuccess(null);
+    try {
+      const res = await fetch('/api/generate-coin-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          country: formData.country,
+          year: formData.year,
+          faceValue: formData.faceValue,
+          currency: formData.currency,
+          itemType: formData.itemType,
+          material: formData.material,
+          mintMark: formData.mintMark,
+          condition: formData.condition,
+          notes: formData.notes,
+          imageUrl: formData.imageUrl
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Fehler bei der KI-Generierung');
+      }
+
+      if (data.title) {
+        setFormData(prev => ({
+          ...prev,
+          name: data.title
+        }));
+        setAiSuccess('✨ Titel wurde erfolgreich von KI generiert!');
+        setTimeout(() => setAiSuccess(null), 6000);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Fehler bei der KI-Generierung');
+    } finally {
+      setIsAiGenerating(false);
+    }
+  };
+
+  const handleAiNotesGenerate = async () => {
+    setIsAiNotesGenerating(true);
+    setAiSuccess(null);
+    try {
+      const res = await fetch('/api/generate-coin-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          country: formData.country,
+          year: formData.year,
+          faceValue: formData.faceValue,
+          currency: formData.currency,
+          itemType: formData.itemType,
+          material: formData.material,
+          mintMark: formData.mintMark,
+          condition: formData.condition,
+          notes: formData.notes,
+          imageUrl: formData.imageUrl
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Fehler bei der KI-Generierung');
+      }
+
+      if (data.description || data.title) {
+        const text = data.description || `Münze: ${data.title}`;
+        setFormData(prev => ({
+          ...prev,
+          notes: text
+        }));
+        setAiSuccess('✨ Bemerkungen wurden erfolgreich von KI verfasst!');
+        setTimeout(() => setAiSuccess(null), 6000);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Fehler bei der KI-Generierung');
+    } finally {
+      setIsAiNotesGenerating(false);
+    }
+  };
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.name.trim()) newErrors.name = 'Name ist erforderlich.';
-    if (!formData.country.trim()) newErrors.country = 'Herkunftsland ist erforderlich.';
-    if (!formData.faceValue.trim()) newErrors.faceValue = 'Nennwert ist erforderlich.';
-    if (!formData.currency.trim()) newErrors.currency = 'Währung ist erforderlich.';
+    if (!formData.name.trim()) newErrors.name = 'Münzname / Bezeichnung ist ein Pflichtfeld.';
+    if (!formData.country.trim()) newErrors.country = 'Herkunftsland ist ein Pflichtfeld.';
+    if (!formData.faceValue.trim()) newErrors.faceValue = 'Nennwert ist ein Pflichtfeld.';
+    if (!formData.currency.trim()) newErrors.currency = 'Währung ist ein Pflichtfeld.';
     if (isNaN(formData.year) || formData.year < -1000 || formData.year > 2100) {
       newErrors.year = 'Ungültiges Prägejahr.';
-    }
-    if (isNaN(formData.purchasePrice) || formData.purchasePrice < 0) {
-      newErrors.purchasePrice = 'Kaufpreis muss mindestens 0 sein.';
     }
     if (isNaN(formData.currentValue) || formData.currentValue < 0) {
       newErrors.currentValue = 'Aktueller Wert muss mindestens 0 sein.';
     }
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const isValid = Object.keys(newErrors).length === 0;
+    if (!isValid) {
+      modalContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    return isValid;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -279,64 +298,103 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, targetField: 'imageUrl' | 'reverseImageUrl') => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Das Bild ist zu groß (maximal 5MB).');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, [targetField]: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      alert('Das Bild ist zu groß (maximal 20MB).');
+      return;
     }
+
+    setUploadingField(targetField);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDim = 800;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Compress to lightweight JPEG data url (~50-80KB)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setFormData(prev => ({ ...prev, [targetField]: compressedDataUrl }));
+        }
+        setUploadingField(null);
+      };
+      img.onerror = () => {
+        alert('Bild konnte nicht verarbeitet werden.');
+        setUploadingField(null);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
-  const applyPreset = (presetData: typeof PRESETS[0]['data']) => {
-    setFormData(prev => ({
-      ...prev,
-      ...presetData
-    }));
-  };
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-[#181a22] border border-amber-500/30 rounded-2xl shadow-2xl shadow-amber-950/40 text-slate-100 flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-950/85 backdrop-blur-md animate-fadeIn max-w-full overflow-x-hidden">
+      <div ref={modalContainerRef} className="relative w-full max-w-3xl min-w-0 max-h-[92vh] overflow-y-auto overflow-x-hidden bg-[#221a16] border border-amber-900/40 rounded-2xl shadow-2xl shadow-amber-950/50 text-stone-100 flex flex-col">
         {/* Modal Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-[#181a22]/95 backdrop-blur-md border-b border-slate-800">
-          <h2 className="text-lg font-bold font-serif text-amber-400 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-amber-400" />
-            {initialCoin ? 'Münze bearbeiten' : 'Neue Münze zur Sammlung hinzufügen'}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-3 sm:px-6 py-3.5 bg-[#221a16]/95 backdrop-blur-md border-b border-[#3e2e26]">
+          <h2 className="text-sm sm:text-lg font-bold font-serif text-amber-400 flex items-center gap-2 min-w-0 pr-2">
+            <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0" />
+            <span className="truncate">{initialCoin ? 'Exemplar bearbeiten' : 'Neues Exemplar zur Sammlung hinzufügen'}</span>
           </h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors"
+            className="p-1.5 sm:p-2 rounded-lg bg-[#1a1412] hover:bg-[#3e2e26] text-stone-400 hover:text-stone-100 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Presets Bar (only for new coins) */}
-          {!initialCoin && (
-            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
-              <div className="text-xs font-semibold text-amber-300 mb-2 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                Schnellauswahl / Vorlagen verwenden:
+        <form onSubmit={handleSubmit} className="p-3 sm:p-6 space-y-5 sm:space-y-6 max-w-full overflow-x-hidden">
+          {/* Validation Error Alert Banner */}
+          {Object.keys(errors).length > 0 && (
+            <div className="p-3.5 sm:p-4 rounded-xl bg-rose-500/15 border-2 border-rose-500/60 text-rose-200 text-xs font-semibold flex items-start gap-3 shadow-lg animate-in fade-in">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-rose-300 text-sm">Speichern nicht möglich – bitte Pflichtfelder ausfüllen!</p>
+                <p className="mt-0.5 text-rose-200">Die folgenden rot markierten Pflichtfelder (*) fehlen oder sind ungültig:</p>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 text-rose-200 font-normal">
+                  {errors.name && <li><strong className="text-rose-300 font-bold">Münzname / Bezeichnung</strong></li>}
+                  {errors.country && <li><strong className="text-rose-300 font-bold">Herkunftsland</strong></li>}
+                  {errors.year && <li><strong className="text-rose-300 font-bold">Prägejahr</strong></li>}
+                  {errors.faceValue && <li><strong className="text-rose-300 font-bold">Nennwert</strong></li>}
+                  {errors.currency && <li><strong className="text-rose-300 font-bold">Währung</strong></li>}
+                  {errors.purchasePrice && <li><strong className="text-rose-300 font-bold">Kaufpreis</strong></li>}
+                  {errors.currentValue && <li><strong className="text-rose-300 font-bold">Aktueller Wert</strong></li>}
+                </ul>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {PRESETS.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => applyPreset(preset.data)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-medium text-amber-200 border border-amber-500/30 hover:border-amber-400 transition-all"
-                  >
-                    + {preset.title}
-                  </button>
-                ))}
-              </div>
+            </div>
+          )}
+
+          {/* KI Banner Notification */}
+          {aiSuccess && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{aiSuccess}</span>
             </div>
           )}
 
@@ -349,14 +407,14 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Katalognummer / Inventarnummer (Gesperrt / Read-Only) */}
               <div className="sm:col-span-2 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30">
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
-                    <Hash className="w-4 h-4 text-amber-400" />
-                    <span>Automatische Katalognummer / Inventarnummer (5-stellig)</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2">
+                  <label className="text-xs font-semibold text-amber-300 flex items-center gap-1.5 min-w-0">
+                    <Hash className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="break-words">Automatische Katalognummer / Inventarnummer</span>
                   </label>
-                  <span className="text-[11px] text-amber-400/90 font-semibold flex items-center gap-1 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/40">
-                    <Lock className="w-3 h-3 text-amber-400" />
-                    Geschützt gegen Verändung
+                  <span className="text-[10px] sm:text-[11px] text-amber-400/90 font-semibold flex items-center gap-1 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/40 shrink-0 self-start sm:self-auto">
+                    <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+                    Geschützt
                   </span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
@@ -442,59 +500,72 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   </div>
                 </div>
 
-                {/* Rarity Selector (Screenshot Matching Pill Style) */}
+                {/* Rarity Selector (Dropdown) */}
                 <div className="pt-2 border-t border-slate-800">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
                       <Crown className="w-4 h-4 text-purple-400" />
                       <span>Seltenheitsgrad (Rarity)</span>
                     </label>
-                    <span className="text-[10px] text-slate-400">Auswahl anklicken</span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {RARITY_OPTIONS.map(opt => {
-                      const isSelected = formData.rarity === opt.fullLabel || formData.rarity === opt.code;
-                      return (
-                        <button
-                          key={opt.code}
-                          type="button"
-                          onClick={() => setFormData({ ...formData, rarity: opt.fullLabel })}
-                          className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center space-x-1.5 ${
-                            isSelected
-                              ? `${opt.pillBg} ring-2 ring-offset-2 ring-offset-[#181a22] ring-amber-400 scale-105 shadow-md`
-                              : `${opt.badgeBgClass} ${opt.badgeTextClass} ${opt.badgeBorderClass} opacity-80 hover:opacity-100 hover:scale-102`
-                          }`}
-                        >
-                          <span>{opt.fullLabel}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <select
+                    value={formData.rarity}
+                    onChange={e => setFormData({ ...formData, rarity: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-purple-300 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500/50 cursor-pointer"
+                  >
+                    <option value="" disabled>-- Seltenheit auswählen --</option>
+                    {RARITY_OPTIONS.map(opt => (
+                      <option key={opt.code} value={opt.fullLabel}>
+                        {opt.fullLabel}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Münzname / Bezeichnung *
-                </label>
+              <div className="sm:col-span-2 space-y-1.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1">
+                    <span>Münzname / Bezeichnung *</span>
+                    <span className="text-[10px] text-rose-400 font-normal">(Pflichtfeld)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAiGenerate}
+                    disabled={isAiGenerating}
+                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md hover:shadow-purple-500/30 transition-all disabled:opacity-50 self-start sm:self-auto"
+                  >
+                    {isAiGenerating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300 shrink-0" />
+                        <span>KI analysiert & verfasst...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                        <span>✨ Mit KI generieren</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="z.B. 5 Franken Vreneli oder 2 Euro Elbphilharmonie"
+                  placeholder="z.B. 5 Franken Vreneli Gold oder 2 Euro Elbphilharmonie"
                   className={`w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
-                    errors.name ? 'border-rose-500' : 'border-slate-800'
+                    errors.name ? 'border-rose-500 bg-rose-950/20' : 'border-slate-800'
                   }`}
                 />
-                {errors.name && <p className="text-xs text-rose-400 mt-1">{errors.name}</p>}
+                {errors.name && <p className="text-xs font-bold text-rose-400 mt-1">{errors.name}</p>}
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1">
                   <label className="text-xs font-medium text-slate-300 flex items-center gap-1">
-                    <Globe className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Herkunftsland (Weltweite Länderliste) *</span>
+                    <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Herkunftsland *</span>
                   </label>
                   <span className="text-[10px] text-slate-400">Tippen oder Auswählen</span>
                 </div>
@@ -541,19 +612,23 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Prägejahr *
+                <label className="block text-xs font-bold text-amber-300 mb-1">
+                  Prägejahr * <span className="text-[10px] text-rose-400 font-normal">(Pflichtfeld)</span>
                 </label>
                 <input
                   type="number"
-                  value={formData.year}
-                  onChange={e => setFormData({ ...formData, year: parseInt(e.target.value, 10) || 0 })}
+                  value={formData.year === 0 ? '' : formData.year}
+                  onFocus={e => e.target.select()}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, year: val === '' ? 0 : parseInt(val, 10) || 0 });
+                  }}
                   placeholder="z.B. 2026 oder 1935"
                   className={`w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border text-sm font-mono text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
-                    errors.year ? 'border-rose-500' : 'border-slate-800'
+                    errors.year ? 'border-rose-500 bg-rose-950/20' : 'border-slate-800'
                   }`}
                 />
-                {errors.year && <p className="text-xs text-rose-400 mt-1">{errors.year}</p>}
+                {errors.year && <p className="text-xs font-bold text-rose-400 mt-1">{errors.year}</p>}
               </div>
 
               <div>
@@ -573,7 +648,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1">
                   <label className="text-xs font-medium text-slate-300">
                     Währung (Standard: CHF) *
                   </label>
@@ -648,34 +723,51 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Kaufpreis (CHF) *
+                  Kaufpreis (CHF) <span className="text-[10px] text-slate-400 font-normal">(Optional)</span>
                 </label>
                 <input
                   type="number"
                   step="0.01"
-                  value={formData.purchasePrice}
-                  onChange={e => setFormData({ ...formData, purchasePrice: parseFloat(e.target.value) || 0 })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border text-sm font-mono text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
-                    errors.purchasePrice ? 'border-rose-500' : 'border-slate-800'
-                  }`}
+                  value={formData.purchasePrice === 0 ? '' : formData.purchasePrice}
+                  placeholder="0.00"
+                  onFocus={e => e.target.select()}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    if (raw === '') {
+                      setFormData({ ...formData, purchasePrice: 0 });
+                    } else {
+                      const parsed = parseFloat(raw.replace(',', '.'));
+                      setFormData({ ...formData, purchasePrice: isNaN(parsed) ? 0 : parsed });
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm font-mono text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                 />
-                {errors.purchasePrice && <p className="text-xs text-rose-400 mt-1">{errors.purchasePrice}</p>}
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Aktueller Wert (CHF) *
+                <label className="block text-xs font-bold text-amber-300 mb-1">
+                  Aktueller Wert (CHF) * <span className="text-[10px] text-rose-400 font-normal">(Pflichtfeld)</span>
                 </label>
                 <input
                   type="number"
                   step="0.01"
-                  value={formData.currentValue}
-                  onChange={e => setFormData({ ...formData, currentValue: parseFloat(e.target.value) || 0 })}
+                  value={formData.currentValue === 0 ? '' : formData.currentValue}
+                  placeholder="0.00"
+                  onFocus={e => e.target.select()}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    if (raw === '') {
+                      setFormData({ ...formData, currentValue: 0 });
+                    } else {
+                      const parsed = parseFloat(raw.replace(',', '.'));
+                      setFormData({ ...formData, currentValue: isNaN(parsed) ? 0 : parsed });
+                    }
+                  }}
                   className={`w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border text-sm font-mono text-amber-300 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
-                    errors.currentValue ? 'border-rose-500' : 'border-slate-800'
+                    errors.currentValue ? 'border-rose-500 bg-rose-950/20' : 'border-slate-800'
                   }`}
                 />
-                {errors.currentValue && <p className="text-xs text-rose-400 mt-1">{errors.currentValue}</p>}
+                {errors.currentValue && <p className="text-xs font-bold text-rose-400 mt-1">{errors.currentValue}</p>}
               </div>
 
               <div>
@@ -692,30 +784,30 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             </div>
 
             {/* Sales & Platforms Section */}
-            <div className="mt-4 p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="mt-4 p-3.5 sm:p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center space-x-2">
-                  <ShoppingBag className="w-4 h-4 text-purple-400" />
+                  <ShoppingBag className="w-4 h-4 text-purple-400 shrink-0" />
                   <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider">
-                    Verkauf & Verkaufsplattform (z.B. Ricardo, eBay, Tutti)
+                    Verkauf & Verkaufsplattform
                   </h4>
                 </div>
                 {onOpenPlatformManager && (
                   <button
                     type="button"
                     onClick={onOpenPlatformManager}
-                    className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 hover:underline flex items-center space-x-1 transition-colors"
+                    className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 hover:underline flex items-center space-x-1 transition-colors self-start sm:self-auto"
                   >
-                    <Settings className="w-3 h-3" />
+                    <Settings className="w-3 h-3 shrink-0" />
                     <span>Plattformen verwalten</span>
                   </button>
                 )}
               </div>
 
               {/* Toggle switch for isForSale */}
-              <div className="flex items-center justify-between bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-                <div className="flex items-center space-x-3">
-                  <label className="relative inline-flex items-center cursor-pointer">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
                     <input
                       type="checkbox"
                       checked={formData.isForSale}
@@ -724,12 +816,12 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                     />
                     <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
                   </label>
-                  <span className="text-xs font-semibold text-purple-200">
-                    Münze steht zum Verkauf / auf Verkaufsplattform eingestellt
+                  <span className="text-xs font-semibold text-purple-200 leading-tight break-words">
+                    Münze steht zum Verkauf / auf Verkaufsplattform
                   </span>
                 </div>
                 {formData.isForSale && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0 self-start sm:self-auto">
                     Aktiv Angeboten
                   </span>
                 )}
@@ -813,9 +905,18 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                       <input
                         type="number"
                         step="0.01"
-                        value={formData.listingPrice}
-                        onChange={e => setFormData({ ...formData, listingPrice: parseFloat(e.target.value) || 0 })}
+                        value={formData.listingPrice === 0 ? '' : formData.listingPrice}
                         placeholder="0.00"
+                        onFocus={e => e.target.select()}
+                        onChange={e => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            setFormData({ ...formData, listingPrice: 0 });
+                          } else {
+                            const parsed = parseFloat(raw.replace(',', '.'));
+                            setFormData({ ...formData, listingPrice: isNaN(parsed) ? 0 : parsed });
+                          }
+                        }}
                         className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm font-mono text-purple-200 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500/50"
                       />
                     </div>
@@ -861,9 +962,18 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                           <input
                             type="number"
                             step="0.01"
-                            value={formData.soldPrice}
-                            onChange={e => setFormData({ ...formData, soldPrice: parseFloat(e.target.value) || 0 })}
+                            value={formData.soldPrice === 0 ? '' : formData.soldPrice}
                             placeholder="0.00"
+                            onFocus={e => e.target.select()}
+                            onChange={e => {
+                              const raw = e.target.value;
+                              if (raw === '') {
+                                setFormData({ ...formData, soldPrice: 0 });
+                              } else {
+                                const parsed = parseFloat(raw.replace(',', '.'));
+                                setFormData({ ...formData, soldPrice: isNaN(parsed) ? 0 : parsed });
+                              }
+                            }}
                             className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-emerald-800 text-sm font-mono text-emerald-200 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                           />
                         </div>
@@ -952,56 +1062,22 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                 </p>
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Prägestätte / Münzzeichen
+                  Material / Legierung
                 </label>
-                <input
-                  type="text"
-                  value={formData.mintMark}
-                  onChange={e => setFormData({ ...formData, mintMark: e.target.value })}
-                  placeholder="z.B. A, D, F, G, J oder Philadelphia"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Material / Feingehalt
-                </label>
-                <input
-                  type="text"
+                <select
                   value={formData.material}
                   onChange={e => setFormData({ ...formData, material: e.target.value })}
-                  placeholder="z.B. Gold 999, Silber 900, Bimetall"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Gewicht
-                </label>
-                <input
-                  type="text"
-                  value={formData.weight}
-                  onChange={e => setFormData({ ...formData, weight: e.target.value })}
-                  placeholder="z.B. 31.10g (1 oz) oder 8.5g"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Durchmesser
-                </label>
-                <input
-                  type="text"
-                  value={formData.diameter}
-                  onChange={e => setFormData({ ...formData, diameter: e.target.value })}
-                  placeholder="z.B. 25.75 mm"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                >
+                  <option value="">-- Material auswählen --</option>
+                  <option value="Cu-Ni">Cu-Ni (Kupfer-Nickel)</option>
+                  <option value="Ag">Ag (Silber)</option>
+                  {formData.material && formData.material !== 'Cu-Ni' && formData.material !== 'Ag' && (
+                    <option value={formData.material}>{formData.material}</option>
+                  )}
+                </select>
               </div>
 
               {/* Vorderseite (Avers) */}
@@ -1011,15 +1087,15 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2.5">
                   <input
-                    type="url"
+                    type="text"
                     value={formData.imageUrl}
                     onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
-                    placeholder="https://beispiel.de/muenze_vorderseite.jpg"
+                    placeholder="https://beispiel.de/muenze_vorderseite.jpg oder Bild hochladen"
                     className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                   />
                   <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200 transition-colors shrink-0">
                     <Upload className="w-4 h-4 text-amber-400" />
-                    <span>Avers hochladen</span>
+                    <span>{uploadingField === 'imageUrl' ? 'Komprimiere...' : 'Avers hochladen'}</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1029,15 +1105,20 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   </label>
                 </div>
                 {formData.imageUrl && (
-                  <div className="mt-3 flex items-center gap-4 p-3 bg-slate-950/80 rounded-xl border border-amber-500/30">
+                  <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                     <img 
                       src={formData.imageUrl} 
                       alt="Vorderseite Vorschau" 
-                      className="w-28 h-28 sm:w-32 sm:h-32 object-cover rounded-full border-2 border-amber-500/50 shadow-md shrink-0" 
+                      referrerPolicy="no-referrer"
+                      className={`object-cover border-2 shadow-md shrink-0 ${
+                        formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))
+                          ? 'w-36 h-24 sm:w-44 sm:h-28 rounded-xl border-emerald-500/60'
+                          : 'w-28 h-28 sm:w-32 sm:h-32 rounded-full border-amber-500/50'
+                      }`} 
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild erfolgreich geladen</p>
+                      <p className="text-[11px] text-stone-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
                       <button
                         type="button"
                         onClick={() => setFormData({ ...formData, imageUrl: '' })}
@@ -1051,21 +1132,21 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </div>
 
               {/* Rückseite (Revers) */}
-              <div className="sm:col-span-2 p-4 bg-slate-900/80 rounded-2xl border border-slate-800">
+              <div className="sm:col-span-2 p-4 bg-[#1a1412]/80 rounded-2xl border border-[#3e2e26]">
                 <label className="block text-xs font-semibold text-amber-300 mb-2">
                   2. Rückseite (Revers) - Bild-URL oder Datei
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2.5">
                   <input
-                    type="url"
+                    type="text"
                     value={formData.reverseImageUrl}
                     onChange={e => setFormData({ ...formData, reverseImageUrl: e.target.value })}
-                    placeholder="https://beispiel.de/muenze_rueckseite.jpg"
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                    placeholder="https://beispiel.de/muenze_rueckseite.jpg oder Bild hochladen"
+                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#140f0d] border border-[#3e2e26] text-sm text-stone-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                   />
-                  <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200 transition-colors shrink-0">
+                  <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#2b211a] hover:bg-[#3d2e26] border border-[#3e2e26] rounded-xl text-xs font-medium text-stone-200 transition-colors shrink-0">
                     <Upload className="w-4 h-4 text-amber-400" />
-                    <span>Revers hochladen</span>
+                    <span>{uploadingField === 'reverseImageUrl' ? 'Komprimiere...' : 'Revers hochladen'}</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1075,15 +1156,20 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   </label>
                 </div>
                 {formData.reverseImageUrl && (
-                  <div className="mt-3 flex items-center gap-4 p-3 bg-slate-950/80 rounded-xl border border-amber-500/30">
+                  <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                     <img 
                       src={formData.reverseImageUrl} 
                       alt="Rückseite Vorschau" 
-                      className="w-28 h-28 sm:w-32 sm:h-32 object-cover rounded-full border-2 border-amber-500/50 shadow-md shrink-0" 
+                      referrerPolicy="no-referrer"
+                      className={`object-cover border-2 shadow-md shrink-0 ${
+                        formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))
+                          ? 'w-36 h-24 sm:w-44 sm:h-28 rounded-xl border-emerald-500/60'
+                          : 'w-28 h-28 sm:w-32 sm:h-32 rounded-full border-amber-500/50'
+                      }`} 
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild erfolgreich geladen</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
                       <button
                         type="button"
                         onClick={() => setFormData({ ...formData, reverseImageUrl: '' })}
@@ -1097,15 +1183,35 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Notizen & Herkunftsgeschichte
-                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1.5">
+                  <label className="text-xs font-semibold text-amber-300 flex items-center gap-1">
+                    <span>Bemerkungen</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAiNotesGenerate}
+                    disabled={isAiNotesGenerating}
+                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md hover:shadow-purple-500/30 transition-all disabled:opacity-50 self-start sm:self-auto"
+                  >
+                    {isAiNotesGenerating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300 shrink-0" />
+                        <span>KI verfasst Bemerkungen...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                        <span>✨ Bemerkungen mit KI verfassen</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea
-                  rows={3}
+                  rows={5}
                   value={formData.notes}
                   onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Besondere Merkmale, Auktionshaus, Zertifikat-Nummer..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                  placeholder="Ausführliche Bemerkungen, KI-generierte Beschreibung, Historie, Erhaltungsmerkmale, Auktionsnotizen..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50 leading-relaxed"
                 />
               </div>
 

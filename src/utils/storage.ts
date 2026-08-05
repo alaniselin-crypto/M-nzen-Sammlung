@@ -195,9 +195,9 @@ export function loadCoinsFromStorage(): Coin[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     let coins: Coin[] = INITIAL_SAMPLE_COINS;
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         coins = parsed;
       }
     }
@@ -224,14 +224,14 @@ export function loadCoinsFromStorage(): Coin[] {
       return c;
     });
 
-    if (modified || !raw) {
+    if (modified || raw === null) {
       saveCoinsToStorage(fixedCoins);
     }
 
     return fixedCoins;
   } catch (error) {
     console.error('Failed to load coin collection from localStorage:', error);
-    return INITIAL_SAMPLE_COINS;
+    return [];
   }
 }
 

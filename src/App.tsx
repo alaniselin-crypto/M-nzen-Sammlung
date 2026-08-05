@@ -39,7 +39,7 @@ import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { AuthModal } from './components/AuthModal';
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
 
   const [coins, setCoins] = useState<Coin[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -55,16 +55,27 @@ export default function App() {
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState<boolean>(false);
   const [isPlatformManagerOpen, setIsPlatformManagerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [importToast, setImportToast] = useState<string | null>(null);
+  const [isFetchingWebhooks, setIsFetchingWebhooks] = useState<boolean>(false);
 
   // Initial Load & User Auth Sync
   useEffect(() => {
+    if (loading) return;
+
     if (user) {
-      // 1. Subscribe to Firestore coins
+      // 1. Auto-sync any local coins/folders to Firestore on login/load
+      const localCoins = loadCoinsFromStorage();
+      if (localCoins.length > 0) {
+        syncLocalDataToFirestore(user.uid, localCoins, loadCustomFolders(localCoins), loadCustomPlatforms(localCoins));
+      }
+
+      // 2. Subscribe to Firestore coins
       const unsubscribeCoins = subscribeToUserCoins(user.uid, (cloudCoins) => {
         setCoins(cloudCoins);
+        saveCoinsToStorage(cloudCoins);
       });
 
-      // 2. Subscribe to Firestore settings (folders & platforms)
+      // 3. Subscribe to Firestore settings (folders & platforms)
       const unsubscribeSettings = subscribeToUserSettings(user.uid, (settings) => {
         if (settings.folders && settings.folders.length > 0) {
           setFolders(settings.folders);
@@ -92,6 +103,125 @@ export default function App() {
       const loadedPlatforms = loadCustomPlatforms(loaded);
       setPlatforms(loadedPlatforms);
     }
+  }, [user, loading]);
+
+  // Polling Make.com Webhook Pending Items
+  const handleFetchPendingWebhooks = async (isManual = false) => {
+    if (isManual) setIsFetchingWebhooks(true);
+    try {
+      const res = await fetch('/api/webhook/make/pending');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.count > 0 && Array.isArray(data.items)) {
+          const newWebhookCoins: Coin[] = data.items.map((item: any) => ({
+            id: item.id || `make-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            name: item.name || 'Münze (Make)',
+            country: item.country || 'Schweiz',
+            year: item.year || new Date().getFullYear(),
+            faceValue: item.faceValue || '1',
+            currency: item.currency || 'CHF',
+            itemType: item.itemType || 'coin',
+            material: item.material || 'Silber',
+            mintMark: item.mintMark || '',
+            condition: item.condition || 'Sehr gut',
+            rarity: item.rarity || 'Sehr häufig (Common)',
+            purchasePrice: item.purchasePrice || 0,
+            currentValue: item.currentValue || 0,
+            notes: item.notes || '',
+            imageUrl: item.imageUrl || '',
+            reverseImageUrl: item.reverseImageUrl || '',
+            storageLocation: item.folder || 'Hauptsammlung',
+            salesListings: [],
+            catalogNumber: '',
+            diameterMm: 0,
+            weightG: 0,
+            fineness: '',
+            edgeDescription: '',
+            mintage: 0,
+            historicalContext: '',
+            certNumber: '',
+            gradingCompany: 'Keine',
+            provenance: '',
+            isFavorite: false,
+            createdAt: item.createdAt || new Date().toISOString()
+          }));
+
+          setCoins(prev => {
+            const updated = [...prev];
+            newWebhookCoins.forEach((newCoin) => {
+              const cleanNewName = newCoin.name.trim().toLowerCase();
+              const existingIdx = updated.findIndex(
+                c => c.name.trim().toLowerCase() === cleanNewName
+              );
+
+              if (existingIdx !== -1) {
+                // Merge images into existing coin instead of creating duplicate
+                const existing = updated[existingIdx];
+                const mergedCoin: Coin = {
+                  ...existing,
+                  imageUrl: existing.imageUrl || newCoin.imageUrl || newCoin.reverseImageUrl,
+                  reverseImageUrl: (existing.reverseImageUrl && existing.reverseImageUrl !== existing.imageUrl)
+                    ? existing.reverseImageUrl
+                    : (newCoin.reverseImageUrl && newCoin.reverseImageUrl !== existing.imageUrl ? newCoin.reverseImageUrl : existing.reverseImageUrl),
+                  notes: existing.notes ? (newCoin.notes && !existing.notes.includes(newCoin.notes) ? `${existing.notes} | ${newCoin.notes}` : existing.notes) : (newCoin.notes || '')
+                };
+                updated[existingIdx] = mergedCoin;
+                if (user) saveCoinToFirestore(user.uid, mergedCoin);
+              } else {
+                const freshCoin = {
+                  ...newCoin,
+                  imageUrl: newCoin.imageUrl || newCoin.reverseImageUrl,
+                  reverseImageUrl: newCoin.reverseImageUrl !== newCoin.imageUrl ? newCoin.reverseImageUrl : ''
+                };
+                updated.unshift(freshCoin);
+                if (user) saveCoinToFirestore(user.uid, freshCoin);
+              }
+            });
+
+            saveCoinsToStorage(updated);
+            return updated;
+          });
+
+          setImportToast(`🎉 ${newWebhookCoins.length} Münze(n) via Google Drive Import hinzugefügt!`);
+          setTimeout(() => setImportToast(null), 6000);
+        } else if (isManual) {
+          setImportToast(`ℹ️ Aktuell keine neuen Münzen im Puffer.`);
+          setTimeout(() => setImportToast(null), 7000);
+        }
+      }
+    } catch {
+      if (isManual) {
+        setImportToast(`⚠️ Fehler beim Abrufen des Imports.`);
+        setTimeout(() => setImportToast(null), 4000);
+      }
+    } finally {
+      if (isManual) setIsFetchingWebhooks(false);
+    }
+  };
+
+  const handleTriggerTestWebhook = async () => {
+    setIsFetchingWebhooks(true);
+    try {
+      const res = await fetch('/api/webhook/make/test', { method: 'POST' });
+      if (res.ok) {
+        await handleFetchPendingWebhooks(true);
+      }
+    } catch {
+      setImportToast('⚠️ Fehler beim Erstellen der Testmünze.');
+    } finally {
+      setIsFetchingWebhooks(false);
+    }
+  };
+
+  useEffect(() => {
+    handleFetchPendingWebhooks(false);
+
+    // Auto-poll every 3 seconds so imported coins from Google Drive / Make appear immediately
+    const interval = setInterval(() => {
+      handleFetchPendingWebhooks(false);
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [user]);
 
   // Sync Local Data to Cloud
@@ -104,16 +234,14 @@ export default function App() {
     await syncLocalDataToFirestore(user.uid, localCoins, localFolders, localPlatforms);
   };
 
-  // Sync state to LocalStorage (Guest Mode)
+  // Sync state to LocalStorage & State
   const updateCoinsState = (newCoins: Coin[]) => {
     setCoins(newCoins);
-    if (!user) {
-      saveCoinsToStorage(newCoins);
-      const updatedFolders = loadCustomFolders(newCoins);
-      setFolders(updatedFolders);
-      const updatedPlatforms = loadCustomPlatforms(newCoins);
-      setPlatforms(updatedPlatforms);
-    }
+    saveCoinsToStorage(newCoins);
+    const updatedFolders = loadCustomFolders(newCoins);
+    setFolders(updatedFolders);
+    const updatedPlatforms = loadCustomPlatforms(newCoins);
+    setPlatforms(updatedPlatforms);
   };
 
   // Folder Management Handlers
@@ -249,11 +377,11 @@ export default function App() {
         updatedAt: now
       } as Coin;
 
+      const updatedList = coins.map(c => c.id === coinData.id ? updatedCoin : c);
+      updateCoinsState(updatedList);
+
       if (user) {
         saveCoinToFirestore(user.uid, updatedCoin);
-      } else {
-        const updatedList = coins.map(c => c.id === coinData.id ? updatedCoin : c);
-        updateCoinsState(updatedList);
       }
     } else {
       // Add new
@@ -265,10 +393,11 @@ export default function App() {
         updatedAt: now
       };
 
+      const updatedList = [newCoin, ...coins];
+      updateCoinsState(updatedList);
+
       if (user) {
         saveCoinToFirestore(user.uid, newCoin);
-      } else {
-        updateCoinsState([newCoin, ...coins]);
       }
     }
 
@@ -307,11 +436,11 @@ export default function App() {
     if (!coinToDelete) return;
     const targetId = coinToDelete.id;
 
+    const updatedList = coins.filter(c => c.id !== targetId);
+    updateCoinsState(updatedList);
+
     if (user) {
       deleteCoinFromFirestore(user.uid, targetId);
-    } else {
-      const updatedList = coins.filter(c => c.id !== targetId);
-      updateCoinsState(updatedList);
     }
 
     if (detailCoin?.id === targetId) {
@@ -379,7 +508,7 @@ export default function App() {
   const totalValuation = coins.reduce((acc, c) => acc + (c.currentValue || 0), 0);
 
   return (
-    <div className="min-h-screen bg-[#121318] text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
+    <div className="min-h-screen bg-[#1a1412] text-stone-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200 overflow-x-hidden max-w-full w-full">
       {/* Header */}
       <Header
         totalValue={totalValuation}
@@ -392,10 +521,30 @@ export default function App() {
         onOpenFolderManager={() => setIsFolderManagerOpen(true)}
         onOpenPlatformManager={() => setIsPlatformManagerOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onManualFetchWebhooks={() => handleFetchPendingWebhooks(true)}
+        isFetchingWebhooks={isFetchingWebhooks}
       />
 
+      {importToast && (
+        <div className="bg-emerald-800/90 border-b border-emerald-600 text-white px-4 py-2.5 text-center text-xs sm:text-sm font-medium shadow-lg flex flex-wrap items-center justify-center gap-3">
+          <span>{importToast}</span>
+          <button
+            onClick={handleTriggerTestWebhook}
+            className="px-2.5 py-1 text-xs bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-md shadow transition-all"
+          >
+            🧪 Test-Münze simulieren
+          </button>
+          <button
+            onClick={() => setImportToast(null)}
+            className="text-xs underline opacity-80 hover:opacity-100"
+          >
+            Ausblenden
+          </button>
+        </div>
+      )}
+
       {/* Main Container View */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-6 pb-24 overflow-x-hidden">
         {activeTab === 'dashboard' && (
           <Dashboard
             coins={coins}
@@ -429,11 +578,11 @@ export default function App() {
         )}
 
         {activeTab === 'add' && (
-          <div className="max-w-2xl mx-auto space-y-4 bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <div className="max-w-2xl mx-auto space-y-4 bg-[#241c18] border border-[#3e2e26] rounded-2xl p-6 shadow-xl">
             <h2 className="text-xl font-serif font-bold text-amber-400">
               Münzerfassung starten
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-stone-400">
               Fügen Sie ein neues Münzexemplar mit Erhaltungsgrad, Kaufpreis und Marktwert zu Ihrer Sammlung hinzu.
             </p>
             <button
@@ -441,7 +590,7 @@ export default function App() {
                 setEditCoin(null);
                 setIsFormModalOpen(true);
               }}
-              className="w-full py-3 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-lg shadow-amber-500/20 transition-all"
+              className="w-full py-3 text-xs font-bold text-stone-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-lg shadow-amber-500/20 transition-all"
             >
               + Formular zur Münzerfassung öffnen
             </button>

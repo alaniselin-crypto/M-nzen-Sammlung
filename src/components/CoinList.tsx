@@ -193,9 +193,9 @@ export const CoinList: React.FC<CoinListProps> = ({
   ].filter(Boolean).length;
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="space-y-6 animate-fadeIn pb-12 max-w-full overflow-x-hidden">
       {/* Search & Main Controls Bar */}
-      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg space-y-4">
+      <div className="bg-[#241c18] border border-[#3e2e26] rounded-2xl p-4 sm:p-5 shadow-lg space-y-4">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Real-time Search Input */}
           <div className="relative w-full md:flex-1">
@@ -205,12 +205,12 @@ export const CoinList: React.FC<CoinListProps> = ({
               value={filter.searchQuery}
               onChange={e => setFilter({ ...filter, searchQuery: e.target.value })}
               placeholder="Echtzeit-Suche nach Name, Land, Währung, Prägestätte..."
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#140f0d] border border-[#3e2e26] text-sm text-stone-100 placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
             />
             {filter.searchQuery && (
               <button
                 onClick={() => setFilter({ ...filter, searchQuery: '' })}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -218,51 +218,51 @@ export const CoinList: React.FC<CoinListProps> = ({
           </div>
 
           {/* Quick Toolbar Buttons */}
-          <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+          <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end flex-wrap">
             {/* Filter Toggle */}
             <button
               onClick={() => setShowFilterDrawer(!showFilterDrawer)}
               className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
                 activeFilterCount > 0 || showFilterDrawer
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                  : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                  : 'bg-[#140f0d] text-stone-300 border-[#3e2e26] hover:border-amber-500/40'
               }`}
             >
               <Filter className="w-4 h-4 text-amber-400" />
               <span>Filter</span>
               {activeFilterCount > 0 && (
-                <span className="w-5 h-5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px] flex items-center justify-center font-mono">
+                <span className="w-5 h-5 rounded-full bg-amber-400 text-stone-950 font-bold text-[10px] flex items-center justify-center font-mono">
                   {activeFilterCount}
                 </span>
               )}
             </button>
 
             {/* Sort Dropdown */}
-            <div className="relative flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1">
+            <div className="relative flex items-center gap-1.5 bg-[#140f0d] border border-[#3e2e26] rounded-xl px-3 py-1">
               <ArrowUpDown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <select
                 value={filter.sortBy}
                 onChange={e => setFilter({ ...filter, sortBy: e.target.value as CoinFilterState['sortBy'] })}
-                className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none py-1 cursor-pointer"
+                className="bg-transparent text-xs font-medium text-stone-200 focus:outline-none py-1 cursor-pointer"
               >
-                <option value="catalogNumber-asc" className="bg-[#181a22] text-slate-200">Münznummer (00001 → 99999)</option>
-                <option value="catalogNumber-desc" className="bg-[#181a22] text-slate-200">Münznummer (Höchste zuerst)</option>
-                <option value="storageLocation-asc" className="bg-[#181a22] text-slate-200">Lagerort / Ordner (A-Z)</option>
-                <option value="currentValue-desc" className="bg-[#181a22] text-slate-200">Wert (Höchster)</option>
-                <option value="currentValue-asc" className="bg-[#181a22] text-slate-200">Wert (Niedrigster)</option>
-                <option value="year-desc" className="bg-[#181a22] text-slate-200">Prägejahr (Neueste)</option>
-                <option value="year-asc" className="bg-[#181a22] text-slate-200">Prägejahr (Älteste)</option>
-                <option value="name-asc" className="bg-[#181a22] text-slate-200">Name (A-Z)</option>
-                <option value="purchaseDate-desc" className="bg-[#181a22] text-slate-200">Kaufdatum (Neueste)</option>
+                <option value="catalogNumber-asc" className="bg-[#241c18] text-stone-200">Münznummer (00001 → 99999)</option>
+                <option value="catalogNumber-desc" className="bg-[#241c18] text-stone-200">Münznummer (Höchste zuerst)</option>
+                <option value="storageLocation-asc" className="bg-[#241c18] text-stone-200">Lagerort / Ordner (A-Z)</option>
+                <option value="currentValue-desc" className="bg-[#241c18] text-stone-200">Wert (Höchster)</option>
+                <option value="currentValue-asc" className="bg-[#241c18] text-stone-200">Wert (Niedrigster)</option>
+                <option value="year-desc" className="bg-[#241c18] text-stone-200">Prägejahr (Neueste)</option>
+                <option value="year-asc" className="bg-[#241c18] text-stone-200">Prägejahr (Älteste)</option>
+                <option value="name-asc" className="bg-[#241c18] text-stone-200">Name (A-Z)</option>
+                <option value="purchaseDate-desc" className="bg-[#241c18] text-stone-200">Kaufdatum (Neueste)</option>
               </select>
             </div>
 
             {/* View Mode Toggle */}
-            <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl">
+            <div className="flex items-center p-1 bg-[#140f0d] border border-[#3e2e26] rounded-xl">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-lg transition-colors ${
-                  viewMode === 'grid' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-400 hover:text-slate-200'
+                  viewMode === 'grid' ? 'bg-amber-500/20 text-amber-400' : 'text-stone-400 hover:text-stone-200'
                 }`}
                 title="Karten-Ansicht"
               >
@@ -271,7 +271,7 @@ export const CoinList: React.FC<CoinListProps> = ({
               <button
                 onClick={() => setViewMode('table')}
                 className={`p-1.5 rounded-lg transition-colors ${
-                  viewMode === 'table' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-400 hover:text-slate-200'
+                  viewMode === 'table' ? 'bg-amber-500/20 text-amber-400' : 'text-stone-400 hover:text-stone-200'
                 }`}
                 title="Tabellen-Ansicht"
               >
@@ -282,7 +282,7 @@ export const CoinList: React.FC<CoinListProps> = ({
             {/* Print Button */}
             <button
               onClick={() => setIsPrintModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/60 text-amber-300 hover:text-amber-200 text-xs font-semibold shadow-md transition-all no-print cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#140f0d] border border-[#3e2e26] hover:border-amber-500/60 text-amber-300 hover:text-amber-200 text-xs font-semibold shadow-md transition-all no-print cursor-pointer"
               title="Katalog-Druckansicht & PDF Export öffnen"
             >
               <Printer className="w-4 h-4 text-amber-400" />
@@ -570,11 +570,11 @@ export const CoinList: React.FC<CoinListProps> = ({
           ))}
         </div>
       ) : (
-        <div className="bg-[#181a22] border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
-          <div className="overflow-x-auto">
+        <div className="bg-[#241c18] border border-[#3e2e26] rounded-2xl overflow-hidden shadow-lg max-w-full">
+          <div className="overflow-x-auto max-w-full">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-900/90 border-b border-slate-800 text-[11px] uppercase font-semibold text-slate-400">
+                <tr className="bg-[#1a1412] border-b border-[#3e2e26] text-[11px] uppercase font-semibold text-stone-400">
                   <th className="py-3 px-3 w-8">★</th>
                   <th className="py-3 px-3">Münzbezeichnung / Land</th>
                   <th className="py-3 px-3">Erhaltung</th>

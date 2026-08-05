@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Edit2, Trash2, Star, TrendingUp, TrendingDown, MapPin, Calendar, Coins, ShieldAlert, Sparkles, Scale, Maximize2, Folder, Copy, Hash, ZoomIn, ZoomOut, RotateCw, ShoppingBag, Tag, CheckCircle2, ExternalLink, Banknote, Crown, Layers } from 'lucide-react';
 import { Coin } from '../types';
+import { CoinAvatar } from './CoinAvatar';
 import { formatCurrency, getConditionLabel } from '../utils/storage';
 import { getRarityOption } from '../data/rarities';
 
@@ -31,7 +32,7 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
   const profit = coin.currentValue - coin.purchasePrice;
   const profitMargin = coin.purchasePrice > 0 ? (profit / coin.purchasePrice) * 100 : 0;
   const isPositive = profit >= 0;
-  const isBanknote = coin.itemType === 'banknote';
+  const isBanknote = coin.itemType === 'banknote' || /banknote|schein|note|papier/i.test(coin.name + ' ' + (coin.material || '') + ' ' + (coin.notes || ''));
   const rarityOpt = getRarityOption(coin.rarity);
 
   const openLightbox = (url: string, title: string) => {
@@ -42,10 +43,10 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
-        <div className="relative w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-[#181a22] border border-amber-500/30 rounded-2xl shadow-2xl shadow-amber-900/20 text-slate-100 flex flex-col">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-950/85 backdrop-blur-md animate-fadeIn max-w-full overflow-x-hidden">
+        <div className="relative w-full max-w-3xl min-w-0 max-h-[92vh] overflow-y-auto overflow-x-hidden bg-[#221a16] border border-amber-900/40 rounded-2xl shadow-2xl shadow-amber-950/50 text-stone-100 flex flex-col">
           {/* Header Modal Bar */}
-          <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-[#181a22]/95 backdrop-blur-md border-b border-slate-800">
+          <div className="sticky top-0 z-10 flex items-center justify-between px-4 sm:px-6 py-4 bg-[#221a16]/95 backdrop-blur-md border-b border-[#3e2e26]">
             <div className="flex items-center gap-2 flex-wrap">
               {coin.catalogNumber && (
                 <span className="px-2.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold flex items-center gap-1">
@@ -67,14 +68,14 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => onToggleFavorite(coin.id)}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-400 transition-colors"
+                className="p-2 rounded-lg bg-[#1a1412] hover:bg-[#3d2e26] text-stone-300 hover:text-amber-400 transition-colors"
                 title="Favorit umschalten"
               >
                 <Star className={`w-4 h-4 ${coin.isFavorite ? 'text-amber-400 fill-amber-400' : ''}`} />
               </button>
               <button
                 onClick={onClose}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors"
+                className="p-2 rounded-lg bg-[#1a1412] hover:bg-[#3d2e26] text-stone-400 hover:text-stone-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -82,43 +83,37 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
           </div>
 
           {/* Content Body */}
-          <div className="p-6 space-y-6">
+          <div className="p-4 sm:p-6 space-y-6">
             {/* Enlarged Coin Images Container (Avers & Revers) */}
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 flex flex-col items-center">
+            <div className="bg-[#1a1412]/80 p-4 sm:p-5 rounded-2xl border border-[#3e2e26] flex flex-col items-center">
               <div className="flex flex-col md:flex-row items-center justify-center gap-6 sm:gap-10 w-full">
                 {/* Vorderseite (Avers) */}
                 <div className="flex flex-col items-center group">
                   <div className="relative">
-                    {coin.imageUrl ? (
-                      <div 
-                        onClick={() => openLightbox(coin.imageUrl!, `${coin.name} - Vorderseite (Avers)`)}
-                        className="relative cursor-pointer overflow-hidden rounded-full border-4 border-amber-500/50 shadow-2xl shadow-amber-900/40 hover:border-amber-400 transition-all hover:scale-105"
-                      >
-                        <img
-                          src={coin.imageUrl}
-                          alt={`${coin.name} - Vorderseite (Avers)`}
-                          className="w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 object-cover"
-                        />
-                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <span className="px-3 py-1.5 rounded-full bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1 shadow-lg">
+                    <div 
+                      onClick={() => coin.imageUrl && openLightbox(coin.imageUrl, `${coin.name} - Vorderseite (Avers)`)}
+                      className="relative cursor-pointer transition-transform hover:scale-105"
+                    >
+                      <CoinAvatar
+                        imageUrl={coin.imageUrl}
+                        name={coin.name}
+                        faceValue={coin.faceValue}
+                        currency={coin.currency}
+                        material={coin.material}
+                        isBanknote={isBanknote}
+                        size="xl"
+                      />
+                      {coin.imageUrl && (
+                        <div className="absolute inset-0 bg-stone-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-full">
+                          <span className="px-3 py-1.5 rounded-full bg-amber-500 text-stone-950 text-xs font-bold flex items-center gap-1 shadow-lg">
                             <Maximize2 className="w-3.5 h-3.5" />
                             Vollbild Zoom
                           </span>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full bg-gradient-to-br from-amber-400/20 via-amber-600/30 to-amber-900/50 border-4 border-amber-500/40 flex flex-col items-center justify-center text-center p-4 shadow-2xl">
-                        <Coins className="w-12 h-12 text-amber-400 mb-2" />
-                        <span className="font-serif font-bold text-2xl text-amber-200">
-                          {coin.faceValue}
-                        </span>
-                        <span className="text-xs uppercase font-semibold text-slate-300 mt-1">
-                          {coin.currency}
-                        </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                     {coin.mintMark && (
-                      <div className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-slate-900 border-2 border-amber-500 flex items-center justify-center font-bold text-xs text-amber-400 shadow-xl">
+                      <div className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-[#1a1412] border-2 border-amber-500 flex items-center justify-center font-bold text-xs text-amber-400 shadow-xl">
                         {coin.mintMark}
                       </div>
                     )}
@@ -135,15 +130,19 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
                     <div className="relative">
                       <div 
                         onClick={() => openLightbox(coin.reverseImageUrl!, `${coin.name} - Rückseite (Revers)`)}
-                        className="relative cursor-pointer overflow-hidden rounded-full border-4 border-amber-500/50 shadow-2xl shadow-amber-900/40 hover:border-amber-400 transition-all hover:scale-105"
+                        className="relative cursor-pointer transition-transform hover:scale-105"
                       >
-                        <img
-                          src={coin.reverseImageUrl}
-                          alt={`${coin.name} - Rückseite (Revers)`}
-                          className="w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 object-cover"
+                        <CoinAvatar
+                          imageUrl={coin.reverseImageUrl}
+                          name={coin.name}
+                          faceValue={coin.faceValue}
+                          currency={coin.currency}
+                          material={coin.material}
+                          isBanknote={isBanknote}
+                          size="xl"
                         />
-                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <span className="px-3 py-1.5 rounded-full bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1 shadow-lg">
+                        <div className="absolute inset-0 bg-stone-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-full">
+                          <span className="px-3 py-1.5 rounded-full bg-amber-500 text-stone-950 text-xs font-bold flex items-center gap-1 shadow-lg">
                             <Maximize2 className="w-3.5 h-3.5" />
                             Vollbild Zoom
                           </span>
@@ -358,34 +357,44 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
                   <span className="text-slate-400">Erhaltungsgrad:</span>
                   <span className="font-semibold text-slate-100">{cond.full} ({cond.label})</span>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
-                  <span className="text-slate-400">Prägestätte:</span>
-                  <span className="font-semibold text-amber-300">{coin.mintMark || 'Keine Angabe'}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
-                  <span className="text-slate-400">Material / Legierung:</span>
-                  <span className="font-semibold text-slate-100">{coin.material || 'k.A.'}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
-                  <span className="text-slate-400">Gewicht:</span>
-                  <span className="font-semibold text-slate-100">{coin.weight || 'k.A.'}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
-                  <span className="text-slate-400">Durchmesser:</span>
-                  <span className="font-semibold text-slate-100">{coin.diameter || 'k.A.'}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
-                  <span className="text-slate-400">Prägeauflage:</span>
-                  <span className="font-semibold text-slate-100">{coin.mintage || 'k.A.'}</span>
-                </div>
+                {coin.mintMark && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
+                    <span className="text-slate-400">Prägestätte:</span>
+                    <span className="font-semibold text-amber-300">{coin.mintMark}</span>
+                  </div>
+                )}
+                {coin.material && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
+                    <span className="text-slate-400">Material / Legierung:</span>
+                    <span className="font-semibold text-amber-300">{coin.material}</span>
+                  </div>
+                )}
+                {coin.weight && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
+                    <span className="text-slate-400">Gewicht:</span>
+                    <span className="font-semibold text-slate-100">{coin.weight}</span>
+                  </div>
+                )}
+                {coin.diameter && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
+                    <span className="text-slate-400">Durchmesser:</span>
+                    <span className="font-semibold text-slate-100">{coin.diameter}</span>
+                  </div>
+                )}
+                {coin.mintage && (
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between">
+                    <span className="text-slate-400">Prägeauflage:</span>
+                    <span className="font-semibold text-slate-100">{coin.mintage}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Notes Section */}
+            {/* Notes / Bemerkungen Section */}
             {coin.notes && (
               <div>
                 <h3 className="text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
-                  Notizen & Herkunft
+                  Bemerkungen
                 </h3>
                 <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">
                   {coin.notes}
@@ -513,6 +522,7 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
             <img
               src={fullscreenImage.url}
               alt={fullscreenImage.title}
+              referrerPolicy="no-referrer"
               style={{
                 transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
                 transition: 'transform 0.2s ease-out'

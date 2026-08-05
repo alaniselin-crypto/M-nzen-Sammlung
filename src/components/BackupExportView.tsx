@@ -153,6 +153,87 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
         </div>
       )}
 
+      {/* Make.com / Integromat Integration Section */}
+      <div className="bg-[#181a22] border border-purple-500/30 hover:border-purple-500/50 rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold text-lg">
+              M
+            </div>
+            <div>
+              <h3 className="text-lg font-bold font-serif text-purple-200 flex items-center gap-2">
+                Make.com (Integromat) Schnittstelle
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Automatisierter Massen-Import & Synchronisation mit Google Sheets, Excel 365, Ricardo oder Notions via Webhooks.
+              </p>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px] font-semibold">
+            Schnittstelle Bereit
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300">
+          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+            <div className="font-bold text-purple-300 uppercase tracking-wider text-[11px]">
+              1. Massen-Import via Make CSV/JSON
+            </div>
+            <p className="text-slate-400 text-[11px] leading-relaxed">
+              Erstellen Sie in Make.com ein Szenario (z.B. Google Sheets → Custom Webhook), das Datensätze im Standard-CSV- oder JSON-Format an Ihre Sammlung übergibt.
+            </p>
+            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 font-mono text-[10px] text-purple-200 overflow-x-auto">
+              {"{ catalogNumber, name, country, year, condition, faceValue, material: 'Cu-Ni'|'Ag', notes }"}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+            <div className="font-bold text-purple-300 uppercase tracking-wider text-[11px]">
+              2. Make Webhook Export Trigger
+            </div>
+            <p className="text-slate-400 text-[11px] leading-relaxed">
+              Tragen Sie Ihre Make Custom Webhook URL ein, um alle {coins.length} Münz-Datensätze per Mausklick an Ihr Make.com Szenario zu senden.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <input
+                type="url"
+                placeholder="https://hook.eu1.make.com/your-custom-webhook"
+                id="makeWebhookUrl"
+                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-purple-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+              />
+              <button
+                onClick={() => {
+                  const input = document.getElementById('makeWebhookUrl') as HTMLInputElement;
+                  const url = input?.value?.trim();
+                  if (!url) {
+                    alert('Bitte geben Sie zuerst eine gültige Make.com Webhook URL ein.');
+                    return;
+                  }
+                  fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ event: 'COIN_COLLECTION_EXPORT', totalCoins: coins.length, coins })
+                  })
+                    .then(res => {
+                      if (res.ok) {
+                        setImportSuccessMsg(`Daten erfolgreich an Make.com Webhook übermittelt (${coins.length} Datensätze)!`);
+                      } else {
+                        alert(`Webhook-Antwort: Status ${res.status}`);
+                      }
+                    })
+                    .catch(err => {
+                      alert(`Fehler beim Senden an Make Webhook: ${err.message}`);
+                    });
+                }}
+                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors shrink-0"
+              >
+                An Make Senden
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {importErrors.length > 0 && (
         <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs space-y-2">
           <div className="flex items-center gap-2 font-bold text-rose-200">
