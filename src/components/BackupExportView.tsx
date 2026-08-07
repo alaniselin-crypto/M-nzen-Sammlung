@@ -1,22 +1,26 @@
 import React, { useState } from 'react';
-import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, ShieldCheck, FileText } from 'lucide-react';
 import { Coin } from '../types';
-import { exportCoinsToCSV, downloadCSVFile, parseCSVToCoins } from '../utils/csv';
+import { exportCoinsToCSV, downloadCSVFile, parseCSVToCoins, downloadCSVTemplate } from '../utils/csv';
 
 interface BackupExportViewProps {
   coins: Coin[];
   onImportCoins: (newCoins: Coin[], replaceExisting: boolean) => void;
   onResetToSampleData: () => void;
+  onClearAllCoins?: () => void;
 }
 
 export const BackupExportView: React.FC<BackupExportViewProps> = ({
   coins,
   onImportCoins,
-  onResetToSampleData
+  onResetToSampleData,
+  onClearAllCoins
 }) => {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string>('');
   const [replaceMode, setReplaceMode] = useState<boolean>(false);
+  const [showConfirmClear, setShowConfirmClear] = useState<boolean>(false);
+  const [showConfirmReset, setShowConfirmReset] = useState<boolean>(false);
 
   const handleExport = () => {
     const csvData = exportCoinsToCSV(coins);
@@ -58,14 +62,24 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
   return (
     <div className="space-y-8 animate-fadeIn pb-12">
       {/* Title Header */}
-      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-lg">
-        <h2 className="text-xl sm:text-2xl font-bold font-serif text-slate-100 flex items-center gap-2">
-          <FileSpreadsheet className="w-6 h-6 text-amber-400" />
-          Datensicherung & CSV Export / Import
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Sichern Sie Ihre Münzdaten lokal als CSV-Datei für Excel, LibreOffice oder stellen Sie Backups wieder her.
-        </p>
+      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold font-serif text-slate-100 flex items-center gap-2">
+            <FileSpreadsheet className="w-6 h-6 text-amber-400" />
+            Datensicherung & CSV Export / Import
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Sichern Sie Ihre Münzdaten lokal als CSV-Datei für Excel, LibreOffice oder stellen Sie Backups wieder her.
+          </p>
+        </div>
+
+        <button
+          onClick={downloadCSVTemplate}
+          className="flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all shadow-sm shrink-0"
+        >
+          <FileText className="w-4 h-4 text-amber-400" />
+          <span>Muster-CSV Vorlage Herunterladen</span>
+        </button>
       </div>
 
       {/* Main Grid: Export & Import Cards */}
@@ -115,6 +129,14 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 Wählen Sie eine zuvor exportierte CSV-Datei aus, um Münzdaten wiederherzustellen.
               </p>
+              <button
+                type="button"
+                onClick={downloadCSVTemplate}
+                className="mt-2 text-xs font-medium text-amber-400 hover:text-amber-300 underline underline-offset-2 flex items-center gap-1.5 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5 shrink-0" />
+                Muster-CSV Vorlage mit Beispiel-Münzen herunterladen
+              </button>
             </div>
 
             {/* Replace / Merge toggle */}
@@ -248,29 +270,86 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
         </div>
       )}
 
-      {/* Demo Reset Section */}
-      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+      {/* Demo Reset & Clear Section */}
+      <div className="bg-[#181a22] border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h3 className="text-base font-bold font-serif text-slate-100 flex items-center gap-2">
             <RefreshCw className="w-4 h-4 text-amber-400" />
-            Musterdaten Wiederherstellen
+            Sammlung Verwalten & Zurücksetzen
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Setzt die App auf die vorbereiteten Beispiel-Münzen (Krügerrand, Römischer Denar, Kaiserreich etc.) zurück.
+            Löschen Sie die aktuelle Sammlung ({coins.length} Münzen) vollständig oder setzen Sie sie auf Musterdaten zurück.
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            if (confirm('Möchten Sie Ihre aktuelle Sammlung wirklich auf die Beispiel-Münzen zurücksetzen?')) {
-              onResetToSampleData();
-              setImportSuccessMsg('Sammlung wurde auf Beispiel-Münzen zurückgesetzt.');
-            }
-          }}
-          className="px-4 py-2.5 text-xs font-semibold text-rose-300 hover:text-rose-100 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 rounded-xl transition-all shrink-0"
-        >
-          Auf Beispiel-Daten Zurücksetzen
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {onClearAllCoins && (
+            showConfirmClear ? (
+              <div className="flex items-center gap-2 bg-rose-950/90 border border-rose-600/80 rounded-xl p-1.5 animate-fadeIn">
+                <span className="text-[11px] text-rose-200 font-medium px-1">Wirklich alle {coins.length} löschen?</span>
+                <button
+                  onClick={() => {
+                    onClearAllCoins();
+                    setShowConfirmClear(false);
+                    setImportSuccessMsg('Alle Münzen wurden erfolgreich gelöscht.');
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-lg shadow transition-all active:scale-95"
+                >
+                  Ja, Löschen
+                </button>
+                <button
+                  onClick={() => setShowConfirmClear(false)}
+                  className="px-2.5 py-1.5 text-xs font-medium text-stone-300 hover:text-white bg-stone-800 hover:bg-stone-700 rounded-lg transition-all"
+                >
+                  Abbrechen
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  setShowConfirmClear(true);
+                  setShowConfirmReset(false);
+                }}
+                disabled={coins.length === 0}
+                className="px-4 py-2.5 text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/70 hover:bg-rose-900 border border-rose-700/60 rounded-xl transition-all disabled:opacity-40 shrink-0 shadow-sm"
+              >
+                🗑️ Alle {coins.length} Münzen Löschen
+              </button>
+            )
+          )}
+
+          {showConfirmReset ? (
+            <div className="flex items-center gap-2 bg-slate-900 border border-amber-500/50 rounded-xl p-1.5 animate-fadeIn">
+              <span className="text-[11px] text-amber-200 font-medium px-1">Auf Musterdaten zurücksetzen?</span>
+              <button
+                onClick={() => {
+                  onResetToSampleData();
+                  setShowConfirmReset(false);
+                  setImportSuccessMsg('Sammlung wurde auf Beispiel-Münzen zurückgesetzt.');
+                }}
+                className="px-3 py-1.5 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg shadow transition-all active:scale-95"
+              >
+                Ja, Zurücksetzen
+              </button>
+              <button
+                onClick={() => setShowConfirmReset(false)}
+                className="px-2.5 py-1.5 text-xs font-medium text-stone-300 hover:text-white bg-stone-800 hover:bg-stone-700 rounded-lg transition-all"
+              >
+                Abbrechen
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setShowConfirmReset(true);
+                setShowConfirmClear(false);
+              }}
+              className="px-4 py-2.5 text-xs font-semibold text-slate-300 hover:text-amber-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all shrink-0"
+            >
+              Auf Beispiel-Münzen Zurücksetzen
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -12,12 +12,16 @@ import {
   loadCustomPlatforms,
   saveCustomPlatforms,
   renamePlatformInCoinsAndStorage,
-  deletePlatformInStorage
+  deletePlatformInStorage,
+  formatSKU,
+  getCoinTitle
 } from './utils/storage';
+import { parseImageSideAndBaseName } from './utils/csv';
 import { 
   subscribeToUserCoins, 
   saveCoinToFirestore, 
   deleteCoinFromFirestore, 
+  clearAllCoinsFromFirestore,
   subscribeToUserSettings, 
   saveUserSettingsToFirestore, 
   syncLocalDataToFirestore 
@@ -37,6 +41,8 @@ import { FolderManagerModal } from './components/FolderManagerModal';
 import { PlatformManagerModal } from './components/PlatformManagerModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { AuthModal } from './components/AuthModal';
+import { LogoDownloadModal } from './components/LogoDownloadModal';
+import { HeroDownloadModal } from './components/HeroDownloadModal';
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -55,24 +61,58 @@ export default function App() {
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState<boolean>(false);
   const [isPlatformManagerOpen, setIsPlatformManagerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isLogoModalOpen, setIsLogoModalOpen] = useState<boolean>(false);
+  const [isHeroModalOpen, setIsHeroModalOpen] = useState<boolean>(false);
   const [importToast, setImportToast] = useState<string | null>(null);
   const [isFetchingWebhooks, setIsFetchingWebhooks] = useState<boolean>(false);
+
+  // Helper to ensure catalogNumber / SKU is populated (5-digit auto-counter)
+  const ensureCoinSKUs = (rawCoins: Coin[]): Coin[] => {
+    let maxSKU = 0;
+
+    // First pass: find highest existing SKU integer from catalogNumber
+    rawCoins.forEach(c => {
+      const s = formatSKU(c.catalogNumber);
+      if (s && /^\d+$/.test(s)) {
+        const num = parseInt(s, 10);
+        if (!isNaN(num) && num > maxSKU) {
+          maxSKU = num;
+        }
+      }
+    });
+
+    // Second pass: assign clean 5-digit SKUs sequentially if missing
+    return rawCoins.map(c => {
+      let sku = formatSKU(c.catalogNumber);
+      if (!sku || !/^\d+$/.test(sku)) {
+        maxSKU++;
+        sku = String(maxSKU).padStart(5, '0');
+      }
+
+      const cleanName = getCoinTitle(c);
+      if (sku !== c.catalogNumber || cleanName !== c.name) {
+        return { ...c, catalogNumber: sku, name: cleanName };
+      }
+      return c;
+    });
+  };
 
   // Initial Load & User Auth Sync
   useEffect(() => {
     if (loading) return;
 
     if (user) {
-      // 1. Auto-sync any local coins/folders to Firestore on login/load
-      const localCoins = loadCoinsFromStorage();
-      if (localCoins.length > 0) {
-        syncLocalDataToFirestore(user.uid, localCoins, loadCustomFolders(localCoins), loadCustomPlatforms(localCoins));
+      // 1. One-time initial sync of offline local storage coins to Firestore
+      const localCoinsBeforeSync = ensureCoinSKUs(loadCoinsFromStorage());
+      if (localCoinsBeforeSync.length > 0) {
+        syncLocalDataToFirestore(user.uid, localCoinsBeforeSync, loadCustomFolders(), loadCustomPlatforms());
       }
 
-      // 2. Subscribe to Firestore coins
+      // 2. Subscribe to Firestore coins as single source of truth
       const unsubscribeCoins = subscribeToUserCoins(user.uid, (cloudCoins) => {
-        setCoins(cloudCoins);
-        saveCoinsToStorage(cloudCoins);
+        const processed = ensureCoinSKUs(cloudCoins);
+        setCoins(processed);
+        saveCoinsToStorage(processed);
       });
 
       // 3. Subscribe to Firestore settings (folders & platforms)
@@ -96,7 +136,7 @@ export default function App() {
       };
     } else {
       // Guest / Offline LocalStorage Load
-      const loaded = loadCoinsFromStorage();
+      const loaded = ensureCoinSKUs(loadCoinsFromStorage());
       setCoins(loaded);
       const loadedFolders = loadCustomFolders(loaded);
       setFolders(loadedFolders);
@@ -110,77 +150,165 @@ export default function App() {
     if (isManual) setIsFetchingWebhooks(true);
     try {
       const res = await fetch('/api/webhook/make/pending');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data.count > 0 && Array.isArray(data.items)) {
-          const newWebhookCoins: Coin[] = data.items.map((item: any) => ({
-            id: item.id || `make-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            name: item.name || 'Münze (Make)',
-            country: item.country || 'Schweiz',
-            year: item.year || new Date().getFullYear(),
-            faceValue: item.faceValue || '1',
-            currency: item.currency || 'CHF',
-            itemType: item.itemType || 'coin',
-            material: item.material || 'Silber',
-            mintMark: item.mintMark || '',
-            condition: item.condition || 'Sehr gut',
-            rarity: item.rarity || 'Sehr häufig (Common)',
-            purchasePrice: item.purchasePrice || 0,
-            currentValue: item.currentValue || 0,
-            notes: item.notes || '',
-            imageUrl: item.imageUrl || '',
-            reverseImageUrl: item.reverseImageUrl || '',
-            storageLocation: item.folder || 'Hauptsammlung',
-            salesListings: [],
-            catalogNumber: '',
-            diameterMm: 0,
-            weightG: 0,
-            fineness: '',
-            edgeDescription: '',
-            mintage: 0,
-            historicalContext: '',
-            certNumber: '',
-            gradingCompany: 'Keine',
-            provenance: '',
-            isFavorite: false,
-            createdAt: item.createdAt || new Date().toISOString()
-          }));
+          const newWebhookCoins: Coin[] = data.items.map((item: any) => {
+            const rawTitle = (item.name || '').trim();
+            const rawBaseName = (item.rawBaseName || '').trim();
+            
+            const parsedFromTitle = parseImageSideAndBaseName(rawTitle);
+            const parsedFromBase = parseImageSideAndBaseName(rawBaseName);
+            const computedBaseKey = parsedFromBase.baseKey || parsedFromTitle.baseKey || rawBaseName || rawTitle;
+
+            const isGeneric = !rawTitle || rawTitle === 'TITEL' || rawTitle === 'Münze (Make)' || rawTitle.toLowerCase().startsWith('drive import') || rawTitle.toLowerCase().startsWith('unbenannt');
+            const coinName = isGeneric ? 'TITEL' : rawTitle;
+
+            // Determine if item images are front or reverse
+            let frontUrl = item.imageUrl || '';
+            let reverseUrl = item.reverseImageUrl || '';
+
+            if (parsedFromTitle.isReverse || parsedFromBase.isReverse) {
+              if (frontUrl && !reverseUrl) {
+                reverseUrl = frontUrl;
+                frontUrl = '';
+              }
+            } else if (parsedFromTitle.isFront || parsedFromBase.isFront) {
+              if (reverseUrl && !frontUrl) {
+                frontUrl = reverseUrl;
+                reverseUrl = '';
+              }
+            }
+
+            return {
+              id: item.id || `make-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              rawBaseName: computedBaseKey.toLowerCase(),
+              name: coinName,
+              country: item.country || 'Schweiz',
+              year: Number(item.year) || new Date().getFullYear(),
+              faceValue: item.faceValue || '1',
+              currency: item.currency || 'CHF',
+              itemType: item.itemType || 'coin',
+              material: item.material || 'Silber',
+              mintMark: item.mintMark || '',
+              condition: item.condition || 'Sehr gut',
+              rarity: item.rarity || 'Sehr häufig (Common)',
+              purchasePrice: Number(item.purchasePrice) || 0,
+              currentValue: Number(item.currentValue) || 0,
+              notes: item.notes || '',
+              imageUrl: frontUrl,
+              reverseImageUrl: reverseUrl,
+              storageLocation: item.folder || 'Hauptsammlung',
+              salesListings: [],
+              catalogNumber: item.catalogNumber ? formatSKU(item.catalogNumber) : '',
+              isFavorite: false,
+              createdAt: item.createdAt || new Date().toISOString()
+            };
+          });
+
+          const coinsToSave: Coin[] = [];
+          const addedFolders = new Set<string>();
 
           setCoins(prev => {
             const updated = [...prev];
+
             newWebhookCoins.forEach((newCoin) => {
+              if (newCoin.storageLocation) {
+                addedFolders.add(newCoin.storageLocation);
+              }
+
               const cleanNewName = newCoin.name.trim().toLowerCase();
-              const existingIdx = updated.findIndex(
-                c => c.name.trim().toLowerCase() === cleanNewName
-              );
+              const cleanBaseName = (newCoin.rawBaseName || '').trim().toLowerCase();
+              const isGenericName = cleanNewName === 'titel' || cleanNewName.startsWith('drive import') || cleanNewName.startsWith('münze') || cleanNewName.startsWith('unbenannt');
+              
+              const existingIdx = updated.findIndex(c => {
+                if (newCoin.id && c.id === newCoin.id) return true;
+
+                // 1. Match by computed baseKey (e.g. "mz 00015")
+                if (cleanBaseName) {
+                  if (c.rawBaseName && parseImageSideAndBaseName(c.rawBaseName).baseKey === cleanBaseName) return true;
+                  if (c.name && parseImageSideAndBaseName(c.name).baseKey === cleanBaseName) return true;
+                  if (c.imageUrl && parseImageSideAndBaseName(c.imageUrl).baseKey === cleanBaseName) return true;
+                  if (c.reverseImageUrl && parseImageSideAndBaseName(c.reverseImageUrl).baseKey === cleanBaseName) return true;
+                }
+
+                // 2. Match by exact title if non-generic
+                if (!isGenericName) {
+                  const cName = c.name.trim().toLowerCase();
+                  if (cName === cleanNewName) return true;
+                }
+                return false;
+              });
 
               if (existingIdx !== -1) {
-                // Merge images into existing coin instead of creating duplicate
+                // Merge images into existing coin without overwriting or losing reverse
                 const existing = updated[existingIdx];
+                let front = existing.imageUrl || '';
+                let reverse = existing.reverseImageUrl || '';
+
+                if (newCoin.reverseImageUrl) {
+                  reverse = newCoin.reverseImageUrl;
+                }
+                if (newCoin.imageUrl) {
+                  if (!front) {
+                    front = newCoin.imageUrl;
+                  } else if (!reverse && newCoin.imageUrl !== front) {
+                    reverse = newCoin.imageUrl;
+                  }
+                }
+
+                if (front === reverse) reverse = '';
+
                 const mergedCoin: Coin = {
                   ...existing,
-                  imageUrl: existing.imageUrl || newCoin.imageUrl || newCoin.reverseImageUrl,
-                  reverseImageUrl: (existing.reverseImageUrl && existing.reverseImageUrl !== existing.imageUrl)
-                    ? existing.reverseImageUrl
-                    : (newCoin.reverseImageUrl && newCoin.reverseImageUrl !== existing.imageUrl ? newCoin.reverseImageUrl : existing.reverseImageUrl),
+                  rawBaseName: existing.rawBaseName || cleanBaseName,
+                  imageUrl: front,
+                  reverseImageUrl: reverse,
                   notes: existing.notes ? (newCoin.notes && !existing.notes.includes(newCoin.notes) ? `${existing.notes} | ${newCoin.notes}` : existing.notes) : (newCoin.notes || '')
                 };
                 updated[existingIdx] = mergedCoin;
-                if (user) saveCoinToFirestore(user.uid, mergedCoin);
+                coinsToSave.push(mergedCoin);
               } else {
-                const freshCoin = {
+                // Fresh coin - keep front and reverse distinct
+                const freshCoin: Coin = {
                   ...newCoin,
-                  imageUrl: newCoin.imageUrl || newCoin.reverseImageUrl,
-                  reverseImageUrl: newCoin.reverseImageUrl !== newCoin.imageUrl ? newCoin.reverseImageUrl : ''
+                  rawBaseName: cleanBaseName,
+                  imageUrl: newCoin.imageUrl || '',
+                  reverseImageUrl: (newCoin.reverseImageUrl && newCoin.reverseImageUrl !== newCoin.imageUrl) ? newCoin.reverseImageUrl : ''
                 };
                 updated.unshift(freshCoin);
-                if (user) saveCoinToFirestore(user.uid, freshCoin);
+                coinsToSave.push(freshCoin);
               }
             });
 
-            saveCoinsToStorage(updated);
-            return updated;
+            const processedUpdated = ensureCoinSKUs(updated);
+            saveCoinsToStorage(processedUpdated);
+            return processedUpdated;
           });
+
+          // Async save to Firestore for all imported/updated coins
+          if (user) {
+            for (const c of coinsToSave) {
+              await saveCoinToFirestore(user.uid, c);
+            }
+          }
+
+          // Update folders list if new folders exist
+          if (addedFolders.size > 0) {
+            setFolders(oldFolders => {
+              const merged = Array.from(new Set([...oldFolders, ...Array.from(addedFolders)]));
+              if (user) {
+                saveUserSettingsToFirestore(user.uid, { folders: merged, platforms });
+              } else {
+                saveCustomFolders(merged);
+              }
+              return merged;
+            });
+          }
+
+          // Clear server queue only AFTER successful local and cloud persistence!
+          await fetch('/api/webhook/make/clear', { method: 'POST' }).catch(() => {});
 
           setImportToast(`🎉 ${newWebhookCoins.length} Münze(n) via Google Drive Import hinzugefügt!`);
           setTimeout(() => setImportToast(null), 6000);
@@ -189,8 +317,9 @@ export default function App() {
           setTimeout(() => setImportToast(null), 7000);
         }
       }
-    } catch {
+    } catch (err) {
       if (isManual) {
+        console.error('Error in handleFetchPendingWebhooks:', err);
         setImportToast(`⚠️ Fehler beim Abrufen des Imports.`);
         setTimeout(() => setImportToast(null), 4000);
       }
@@ -236,11 +365,12 @@ export default function App() {
 
   // Sync state to LocalStorage & State
   const updateCoinsState = (newCoins: Coin[]) => {
-    setCoins(newCoins);
-    saveCoinsToStorage(newCoins);
-    const updatedFolders = loadCustomFolders(newCoins);
+    const processed = ensureCoinSKUs(newCoins);
+    setCoins(processed);
+    saveCoinsToStorage(processed);
+    const updatedFolders = loadCustomFolders(processed);
     setFolders(updatedFolders);
-    const updatedPlatforms = loadCustomPlatforms(newCoins);
+    const updatedPlatforms = loadCustomPlatforms(processed);
     setPlatforms(updatedPlatforms);
   };
 
@@ -495,12 +625,22 @@ export default function App() {
   };
 
   // Reset Data Handler
-  const handleResetToSampleData = () => {
+  const handleResetToSampleData = async () => {
     const resetList = resetCoinsToSampleData();
+    updateCoinsState(resetList);
     if (user) {
-      resetList.forEach(c => saveCoinToFirestore(user.uid, c));
-    } else {
-      setCoins(resetList);
+      await clearAllCoinsFromFirestore(user.uid);
+      for (const c of resetList) {
+        await saveCoinToFirestore(user.uid, c);
+      }
+    }
+  };
+
+  // Clear All Coins Handler
+  const handleClearAllCoins = async () => {
+    updateCoinsState([]);
+    if (user) {
+      await clearAllCoinsFromFirestore(user.uid);
     }
   };
 
@@ -521,6 +661,8 @@ export default function App() {
         onOpenFolderManager={() => setIsFolderManagerOpen(true)}
         onOpenPlatformManager={() => setIsPlatformManagerOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenLogoModal={() => setIsLogoModalOpen(true)}
+        onOpenHeroModal={() => setIsHeroModalOpen(true)}
         onManualFetchWebhooks={() => handleFetchPendingWebhooks(true)}
         isFetchingWebhooks={isFetchingWebhooks}
       />
@@ -606,6 +748,7 @@ export default function App() {
             coins={coins}
             onImportCoins={handleImportCoins}
             onResetToSampleData={handleResetToSampleData}
+            onClearAllCoins={handleClearAllCoins}
           />
         )}
       </main>
@@ -689,6 +832,16 @@ export default function App() {
         coin={coinToDelete}
         onClose={() => setCoinToDelete(null)}
         onConfirm={handleConfirmDeleteCoin}
+      />
+
+      <LogoDownloadModal
+        isOpen={isLogoModalOpen}
+        onClose={() => setIsLogoModalOpen(false)}
+      />
+
+      <HeroDownloadModal
+        isOpen={isHeroModalOpen}
+        onClose={() => setIsHeroModalOpen(false)}
       />
     </div>
   );

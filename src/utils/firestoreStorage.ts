@@ -6,7 +6,8 @@ import {
   onSnapshot, 
   query, 
   where,
-  getDocs
+  getDocs,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Coin } from '../types';
@@ -86,8 +87,7 @@ export function subscribeToUserCoins(userId: string, callback: (coins: Coin[]) =
 
     callback(coins);
   }, (error) => {
-    console.error('Firestore coins subscription error:', error);
-    handleFirestoreError(error, OperationType.GET, COINS_COLLECTION);
+    console.warn('Firestore coins subscription warning/error:', error);
   });
 }
 
@@ -140,9 +140,16 @@ export async function saveCoinToFirestore(userId: string, coin: Coin): Promise<v
     const compressedImageUrl = coin.imageUrl ? await compressDataUrlIfNeeded(coin.imageUrl, 800, 0.75) : '';
     const compressedReverseImageUrl = coin.reverseImageUrl ? await compressDataUrlIfNeeded(coin.reverseImageUrl, 800, 0.75) : '';
 
+    const cleanCoinData: Record<string, any> = {};
+    Object.entries(coin).forEach(([key, value]) => {
+      if (value !== undefined) {
+        cleanCoinData[key] = value;
+      }
+    });
+
     const coinRef = doc(db, COINS_COLLECTION, coin.id);
     const coinData = {
-      ...coin,
+      ...cleanCoinData,
       imageUrl: compressedImageUrl,
       reverseImageUrl: compressedReverseImageUrl,
       userId,
@@ -150,6 +157,7 @@ export async function saveCoinToFirestore(userId: string, coin: Coin): Promise<v
     };
     await setDoc(coinRef, coinData, { merge: true });
   } catch (error) {
+    console.error('saveCoinToFirestore error:', error);
     handleFirestoreError(error, OperationType.WRITE, `${COINS_COLLECTION}/${coin.id}`);
   }
 }
@@ -160,6 +168,28 @@ export async function deleteCoinFromFirestore(userId: string, coinId: string): P
     await deleteDoc(coinRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `${COINS_COLLECTION}/${coinId}`);
+  }
+}
+
+export async function clearAllCoinsFromFirestore(userId: string): Promise<void> {
+  try {
+    const q = query(
+      collection(db, COINS_COLLECTION),
+      where('userId', '==', userId)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return;
+
+    const docs = snapshot.docs;
+    for (let i = 0; i < docs.length; i += 450) {
+      const batch = writeBatch(db);
+      const chunk = docs.slice(i, i + 450);
+      chunk.forEach(docSnap => batch.delete(docSnap.ref));
+      await batch.commit();
+    }
+  } catch (error) {
+    console.error('clearAllCoinsFromFirestore error:', error);
+    handleFirestoreError(error, OperationType.DELETE, COINS_COLLECTION);
   }
 }
 
@@ -176,8 +206,7 @@ export function subscribeToUserSettings(
       callback({});
     }
   }, (error) => {
-    console.error('Firestore userSettings subscription error:', error);
-    handleFirestoreError(error, OperationType.GET, `${SETTINGS_COLLECTION}/${userId}`);
+    console.warn('Firestore userSettings subscription warning/error:', error);
   });
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "numisma-app",
+  "name": "inumis-app",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -15,8 +15,8 @@
     "build:mac": "vite build && electron-builder --mac dmg zip"
   },
   "build": {
-    "appId": "com.numisma.app",
-    "productName": "Numisma - Münzsammlung Manager",
+    "appId": "com.inumis.app",
+    "productName": "inumis.app - Münzsammlung Manager",
     "directories": {
       "output": "release"
     },

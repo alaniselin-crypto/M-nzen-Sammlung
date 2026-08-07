@@ -2,6 +2,7 @@ import React from 'react';
 import { Coins, TrendingUp, TrendingDown, DollarSign, Award, ArrowRight, ShieldCheck, PieChart as PieIcon, BarChart as BarIcon, Plus } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import { Coin, TabType } from '../types';
+import { CoinAvatar } from './CoinAvatar';
 import { formatCurrency, getConditionLabel } from '../utils/storage';
 
 interface DashboardProps {
@@ -197,7 +198,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <div className="h-64 w-full flex-1">
             {countryChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minHeight={220}>
                 <PieChart>
                   <Pie
                     data={countryChartData}
@@ -246,7 +247,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <div className="h-64 w-full flex-1">
             {conditionChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minHeight={220}>
                 <BarChart data={conditionChartData}>
                   <XAxis dataKey="name" stroke="#a8a29e" fontSize={11} />
                   <YAxis stroke="#a8a29e" fontSize={11} allowDecimals={false} />
@@ -295,25 +296,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="group cursor-pointer bg-[#1a1412]/80 hover:bg-[#2e231d] border border-[#3e2e26] hover:border-amber-500/40 rounded-xl p-4 transition-all duration-200"
               >
                 <div className="flex items-center gap-3 mb-2">
-                  {(coin.imageUrl || coin.reverseImageUrl) ? (
-                    <img
-                      src={coin.imageUrl || coin.reverseImageUrl}
-                      alt={coin.name}
-                      className={`object-cover border shrink-0 ${
-                        isBanknote
-                          ? 'w-12 h-8 rounded-lg border-emerald-500/50'
-                          : 'w-10 h-10 rounded-full border-amber-500/40'
-                      }`}
-                    />
-                  ) : (
-                    <div className={`bg-stone-800 border flex items-center justify-center font-serif text-amber-400 text-xs font-bold shrink-0 ${
-                      isBanknote
-                        ? 'w-12 h-8 rounded-lg border-emerald-500/40'
-                        : 'w-10 h-10 rounded-full border-amber-500/30'
-                    }`}>
-                      {coin.faceValue}
-                    </div>
-                  )}
+                  <CoinAvatar
+                    imageUrl={coin.imageUrl || coin.reverseImageUrl}
+                    name={coin.name}
+                    faceValue={coin.faceValue}
+                    currency={coin.currency}
+                    material={coin.material}
+                    isBanknote={isBanknote}
+                    size="sm"
+                  />
                   <div className="min-w-0 flex-1">
                     <h4 className="text-xs font-bold text-stone-200 group-hover:text-amber-300 truncate">
                       {coin.name}

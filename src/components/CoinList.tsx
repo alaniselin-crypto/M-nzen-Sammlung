@@ -32,6 +32,7 @@ export const CoinList: React.FC<CoinListProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState<number>(24);
 
   const [filter, setFilter] = useState<CoinFilterState>({
     searchQuery: '',
@@ -49,6 +50,11 @@ export const CoinList: React.FC<CoinListProps> = ({
     sortBy: 'catalogNumber-asc',
     onlyFavorites: false
   });
+
+  // Reset pagination on filter changes
+  React.useEffect(() => {
+    setVisibleCount(24);
+  }, [filter]);
 
   // Extract unique countries, materials, storage locations & platforms for dropdowns
   const uniqueCountries = useMemo(() => {
@@ -554,53 +560,78 @@ export const CoinList: React.FC<CoinListProps> = ({
             </button>
           </div>
         </div>
-      ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredCoins.map(coin => (
-            <CoinCard
-              key={coin.id}
-              coin={coin}
-              viewMode="grid"
-              onViewDetails={onViewDetails}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onToggleFavorite={onToggleFavorite}
-              onDuplicate={onDuplicate}
-            />
-          ))}
-        </div>
       ) : (
-        <div className="bg-[#241c18] border border-[#3e2e26] rounded-2xl overflow-hidden shadow-lg max-w-full">
-          <div className="overflow-x-auto max-w-full">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#1a1412] border-b border-[#3e2e26] text-[11px] uppercase font-semibold text-stone-400">
-                  <th className="py-3 px-3 w-8">★</th>
-                  <th className="py-3 px-3">Münzbezeichnung / Land</th>
-                  <th className="py-3 px-3">Erhaltung</th>
-                  <th className="py-3 px-3">Kaufpreis</th>
-                  <th className="py-3 px-3">Aktueller Wert</th>
-                  <th className="py-3 px-3">Gewinn %</th>
-                  <th className="py-3 px-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCoins.map(coin => (
-                  <CoinCard
-                    key={coin.id}
-                    coin={coin}
-                    viewMode="table"
-                    onViewDetails={onViewDetails}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onToggleFavorite={onToggleFavorite}
-                    onDuplicate={onDuplicate}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <>
+          {viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredCoins.slice(0, visibleCount).map(coin => (
+                <CoinCard
+                  key={coin.id}
+                  coin={coin}
+                  viewMode="grid"
+                  onViewDetails={onViewDetails}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onToggleFavorite={onToggleFavorite}
+                  onDuplicate={onDuplicate}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-[#241c18] border border-[#3e2e26] rounded-2xl overflow-hidden shadow-lg max-w-full">
+              <div className="overflow-x-auto max-w-full">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[#1a1412] border-b border-[#3e2e26] text-[11px] uppercase font-semibold text-stone-400">
+                      <th className="py-3 px-3 w-8">★</th>
+                      <th className="py-3 px-3">Münzbezeichnung / Land</th>
+                      <th className="py-3 px-3">Erhaltung</th>
+                      <th className="py-3 px-3">Kaufpreis</th>
+                      <th className="py-3 px-3">Aktueller Wert</th>
+                      <th className="py-3 px-3">Gewinn %</th>
+                      <th className="py-3 px-3 text-right">Aktionen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCoins.slice(0, visibleCount).map(coin => (
+                      <CoinCard
+                        key={coin.id}
+                        coin={coin}
+                        viewMode="table"
+                        onViewDetails={onViewDetails}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                        onToggleFavorite={onToggleFavorite}
+                        onDuplicate={onDuplicate}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Pagination / Load More Button for Mobile Performance */}
+          {filteredCoins.length > visibleCount && (
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-6 pb-2">
+              <button
+                onClick={() => setVisibleCount(prev => prev + 24)}
+                className="w-full sm:w-auto px-6 py-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+              >
+                <span>Weitere 24 Münzen laden</span>
+                <span className="font-mono text-[11px] bg-amber-500/20 px-2 py-0.5 rounded-full text-amber-300">
+                  ({Math.min(visibleCount, filteredCoins.length)} von {filteredCoins.length})
+                </span>
+              </button>
+              <button
+                onClick={() => setVisibleCount(filteredCoins.length)}
+                className="w-full sm:w-auto px-4 py-3 bg-[#1e1713] hover:bg-[#2e231c] text-stone-300 border border-[#3e2e26] rounded-xl text-xs font-semibold transition-all text-center"
+              >
+                Alle {filteredCoins.length} auf einmal anzeigen
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Printable Catalog Table (Only visible when printing) */}

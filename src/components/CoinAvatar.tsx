@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Coins, Banknote, ImageOff } from 'lucide-react';
+import { formatDriveImageUrl } from '../utils/csv';
 
 interface CoinAvatarProps {
   imageUrl?: string | null;
@@ -46,13 +47,16 @@ export const CoinAvatar: React.FC<CoinAvatarProps> = ({
     xl: isBanknote ? 'w-64 sm:w-80 h-40 sm:h-52 rounded-2xl text-lg' : 'w-48 h-48 sm:w-64 sm:h-64 rounded-full text-xl'
   };
 
-  const hasValidImage = Boolean(imageUrl && imageUrl.trim() !== '' && !imageError);
+  const formattedUrl = formatDriveImageUrl(imageUrl);
+  const hasValidImage = Boolean(formattedUrl && formattedUrl.trim() !== '' && !imageError);
 
   if (hasValidImage) {
     return (
       <img
-        src={imageUrl!}
+        src={formattedUrl}
         alt={altText || name}
+        loading="lazy"
+        decoding="async"
         referrerPolicy="no-referrer"
         onError={() => setImageError(true)}
         onClick={onClick}

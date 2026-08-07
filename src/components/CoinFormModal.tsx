@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Upload, Sparkles, AlertCircle, Folder, Settings, Hash, Globe, Eye, Lock, Tag, ShoppingBag, ExternalLink, Banknote, Coins, Layers, Crown, Loader2, CheckCircle2 } from 'lucide-react';
 import { Coin, CoinCondition } from '../types';
+import { CoinAvatar } from './CoinAvatar';
+import { formatSKU } from '../utils/storage';
 import { WORLD_COUNTRIES, POPULAR_COIN_COUNTRIES } from '../data/countries';
 import { POPULAR_CURRENCIES } from '../data/currencies';
 import { RARITY_OPTIONS } from '../data/rarities';
@@ -74,7 +76,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
   useEffect(() => {
     if (initialCoin) {
       setFormData({
-        catalogNumber: initialCoin.catalogNumber || '',
+        catalogNumber: formatSKU(initialCoin.catalogNumber) || '00001',
         itemType: initialCoin.itemType || 'coin',
         quantity: initialCoin.quantity || 1,
         rarity: initialCoin.rarity || 'A - Häufig',
@@ -108,7 +110,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
       });
     } else {
       setFormData({
-        catalogNumber: nextCatalogNumber || '00001',
+        catalogNumber: formatSKU(nextCatalogNumber) || '00001',
         itemType: 'coin',
         quantity: 1,
         rarity: 'A - Häufig',
@@ -151,6 +153,11 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
   const [uploadingField, setUploadingField] = useState<'imageUrl' | 'reverseImageUrl' | null>(null);
 
   const handleAiGenerate = async () => {
+    if (!formData.imageUrl && !formData.reverseImageUrl) {
+      alert('Bitte laden Sie zuerst mindestens ein Bild (Vorderseite oder Rückseite) hoch, damit die KI das Sammlungsstück rein optisch identifizieren kann.');
+      return;
+    }
+
     setIsAiGenerating(true);
     setAiSuccess(null);
     try {
@@ -158,16 +165,8 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          country: formData.country,
-          year: formData.year,
-          faceValue: formData.faceValue,
-          currency: formData.currency,
-          itemType: formData.itemType,
-          material: formData.material,
-          mintMark: formData.mintMark,
-          condition: formData.condition,
-          notes: formData.notes,
-          imageUrl: formData.imageUrl
+          imageUrl: formData.imageUrl,
+          reverseImageUrl: formData.reverseImageUrl
         })
       });
 
@@ -179,9 +178,15 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
       if (data.title) {
         setFormData(prev => ({
           ...prev,
-          name: data.title
+          name: data.title,
+          country: data.country || prev.country,
+          year: (data.year && !isNaN(Number(data.year))) ? Number(data.year) : prev.year,
+          faceValue: data.faceValue || prev.faceValue,
+          currency: data.currency || prev.currency,
+          material: data.material || prev.material,
+          notes: (!prev.notes || prev.notes === 'Keine') && data.description ? data.description : prev.notes
         }));
-        setAiSuccess('✨ Titel wurde erfolgreich von KI generiert!');
+        setAiSuccess(`✨ Rein optische KI-Erkennung erfolgreich: ${data.faceValue || ''} ${data.currency || ''} (${data.year || ''})`);
         setTimeout(() => setAiSuccess(null), 6000);
       }
     } catch (err: any) {
@@ -209,7 +214,8 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
           mintMark: formData.mintMark,
           condition: formData.condition,
           notes: formData.notes,
-          imageUrl: formData.imageUrl
+          imageUrl: formData.imageUrl,
+          reverseImageUrl: formData.reverseImageUrl
         })
       });
 
@@ -1106,15 +1112,14 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                 </div>
                 {formData.imageUrl && (
                   <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                    <img 
-                      src={formData.imageUrl} 
-                      alt="Vorderseite Vorschau" 
-                      referrerPolicy="no-referrer"
-                      className={`object-cover border-2 shadow-md shrink-0 ${
-                        formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))
-                          ? 'w-36 h-24 sm:w-44 sm:h-28 rounded-xl border-emerald-500/60'
-                          : 'w-28 h-28 sm:w-32 sm:h-32 rounded-full border-amber-500/50'
-                      }`} 
+                    <CoinAvatar
+                      imageUrl={formData.imageUrl}
+                      name={formData.name || 'Vorderseite Vorschau'}
+                      faceValue={formData.faceValue}
+                      currency={formData.currency}
+                      material={formData.material}
+                      isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                      size="md"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
@@ -1157,15 +1162,14 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                 </div>
                 {formData.reverseImageUrl && (
                   <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                    <img 
-                      src={formData.reverseImageUrl} 
-                      alt="Rückseite Vorschau" 
-                      referrerPolicy="no-referrer"
-                      className={`object-cover border-2 shadow-md shrink-0 ${
-                        formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))
-                          ? 'w-36 h-24 sm:w-44 sm:h-28 rounded-xl border-emerald-500/60'
-                          : 'w-28 h-28 sm:w-32 sm:h-32 rounded-full border-amber-500/50'
-                      }`} 
+                    <CoinAvatar
+                      imageUrl={formData.reverseImageUrl}
+                      name={formData.name || 'Rückseite Vorschau'}
+                      faceValue={formData.faceValue}
+                      currency={formData.currency}
+                      material={formData.material}
+                      isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                      size="md"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>

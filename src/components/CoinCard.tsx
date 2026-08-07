@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Star, Eye, Edit2, Trash2, TrendingUp, TrendingDown, MapPin, Calendar, Scale, Sparkles, RefreshCw, Copy, Folder, Hash, ShoppingBag, Tag, CheckCircle2, Banknote, Coins, Layers, Crown } from 'lucide-react';
 import { Coin } from '../types';
 import { CoinAvatar } from './CoinAvatar';
-import { formatCurrency, getConditionLabel } from '../utils/storage';
+import { formatCurrency, getConditionLabel, formatSKU, getCoinTitle } from '../utils/storage';
 import { getRarityOption } from '../data/rarities';
 
 interface CoinCardProps {
@@ -90,10 +90,10 @@ export const CoinCard: React.FC<CoinCardProps> = ({
               <div className="font-semibold text-stone-100 line-clamp-1 flex items-center gap-1.5">
                 {coin.catalogNumber && (
                   <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded">
-                    #{coin.catalogNumber}
+                    #{formatSKU(coin.catalogNumber)}
                   </span>
                 )}
-                <span>{coin.name}</span>
+                <span>{getCoinTitle(coin)}</span>
                 {quantity > 1 && (
                   <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded font-bold">
                     {quantity}x
@@ -189,11 +189,9 @@ export const CoinCard: React.FC<CoinCardProps> = ({
       <div>
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {coin.catalogNumber && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[11px] font-bold" title="Münznummer">
-                #{coin.catalogNumber}
-              </span>
-            )}
+            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[11px] font-bold" title="Münznummer / SKU">
+              #{formatSKU(coin.catalogNumber || coin.id || '1')}
+            </span>
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${cond.color}`}>
               {cond.label}
             </span>
@@ -225,7 +223,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             <div className="relative">
               <CoinAvatar
                 imageUrl={currentDisplayImage}
-                name={coin.name}
+                name={getCoinTitle(coin)}
                 faceValue={coin.faceValue}
                 currency={coin.currency}
                 material={coin.material}
@@ -257,7 +255,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
 
           <div className="flex-1 min-w-0">
             <h3 className="font-bold text-slate-100 text-sm sm:text-base leading-snug line-clamp-2 group-hover:text-amber-300 transition-colors">
-              {coin.name}
+              {getCoinTitle(coin)}
             </h3>
 
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-slate-400">

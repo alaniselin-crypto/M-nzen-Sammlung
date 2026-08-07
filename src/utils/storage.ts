@@ -474,3 +474,43 @@ export function deletePlatformInStorage(
   return { updatedCoins, updatedPlatforms };
 }
 
+export function formatSKU(sku?: string): string {
+  if (!sku) return '';
+  const trimmed = sku.trim();
+  if (!trimmed) return '';
+
+  const num = parseInt(trimmed, 10);
+  if (!isNaN(num) && num >= 0 && /^\d+$/.test(trimmed)) {
+    return String(num).padStart(5, '0');
+  }
+
+  return trimmed;
+}
+
+export function getCoinTitle(coin: Partial<Coin>): string {
+  let name = (coin.name || '').trim();
+  if (name) {
+    name = name
+      .replace(/\.(jpg|jpeg|png|webp|heic|csv)$/i, '')
+      .replace(/_/g, ' ')
+      .trim();
+  }
+
+  if (name) {
+    return name;
+  }
+
+  const val = coin.faceValue || '';
+  const curr = coin.currency || 'CHF';
+  const country = coin.country || '';
+  const yrStr = coin.year && coin.year > 0 ? String(coin.year) : '';
+
+  const parts: string[] = [];
+  if (val) parts.push(`${val} ${curr}`.trim());
+  if (country) parts.push(country);
+  if (yrStr) parts.push(`(${yrStr})`);
+
+  const generated = parts.join(' ');
+  return generated.trim() || 'Münze';
+}
+

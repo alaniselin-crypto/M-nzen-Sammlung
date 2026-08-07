@@ -12,7 +12,10 @@ import {
   CheckCircle2,
   ShieldCheck,
   Smartphone,
-  Globe
+  Globe,
+  Eye,
+  EyeOff,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -29,15 +32,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSyncLocalData,
   hasLocalCoinsCount = 0
 }) => {
-  const { user, loginWithEmail, registerWithEmail, loginWithGoogle, logout } = useAuth();
+  const { user, loginWithEmail, registerWithEmail, resetPassword, loginWithGoogle, logout } = useAuth();
   
   const [isRegisterMode, setIsRegisterMode] = useState<boolean>(true);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [canAutoRegister, setCanAutoRegister] = useState<boolean>(false);
+  const [canAutoLogin, setCanAutoLogin] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -45,14 +52,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+    setCanAutoRegister(false);
+    setCanAutoLogin(false);
 
-    if (!email || !password) {
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail || !password) {
       setErrorMsg('Bitte geben Sie Ihre E-Mail-Adresse und ein Passwort ein.');
       return;
     }
 
-    if (isRegisterMode && password !== confirmPassword) {
-      setErrorMsg('Die eingegebenen Passwörter stimmen nicht überein.');
+    const effectiveConfirm = (isRegisterMode && !confirmPassword) ? password : confirmPassword;
+
+    if (isRegisterMode && password !== effectiveConfirm) {
+      setErrorMsg('Die eingegebenen Passwörter stimmen nicht überein. Tippen Sie auf das Augensymbol, um das Passwort anzuzeigen.');
       return;
     }
 
@@ -65,10 +78,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (isRegisterMode) {
-        await registerWithEmail(email, password);
-        setSuccessMsg('Registrierung erfolgreich! Ihre Daten werden jetzt im Netzwerk synchronisiert.');
+        await registerWithEmail(trimmedEmail, password);
+        setSuccessMsg('Registrierung erfolgreich! Ihre Münzsammlung ist jetzt sicher in der Cloud.');
       } else {
-        await loginWithEmail(email, password);
+        await loginWithEmail(trimmedEmail, password);
         setSuccessMsg('Erfolgreich angemeldet!');
       }
 
@@ -83,15 +96,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       console.error('Auth error:', err);
       let msg = 'Ein Fehler ist aufgetreten.';
       if (err.code === 'auth/email-already-in-use') {
-        msg = 'Diese E-Mail-Adresse wird bereits verwendet. Bitte melden Sie sich an.';
+        msg = 'Diese E-Mail-Adresse ist bereits registriert!';
+        setCanAutoLogin(true);
       } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = 'Ungültige E-Mail-Adresse oder Passwort.';
+        if (isRegisterMode) {
+          msg = 'Registrierung fehlgeschlagen. Bitte überprüfen Sie Ihre Eingaben.';
+        } else {
+          msg = 'Anmeldung fehlgeschlagen. Falsches Passwort oder das Konto existiert noch nicht.';
+          setCanAutoRegister(true);
+        }
       } else if (err.code === 'auth/user-not-found') {
-        msg = 'Kein Konto mit dieser E-Mail gefunden. Bitte registrieren Sie sich zuerst.';
+        msg = 'Kein Konto mit dieser E-Mail gefunden.';
+        setCanAutoRegister(true);
       } else if (err.code === 'auth/invalid-email') {
         msg = 'Ungültiges E-Mail-Format.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        msg = 'E-Mail/Passwort-Anmeldung ist im Firebase-Backend deaktiviert.';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Das Passwort ist zu schwach (mindestens 6 Zeichen).';
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = 'Zu viele Versuche. Bitte warten Sie kurz.';
+      } else {
+        msg = `Fehler: ${err.code || err.message || 'Unbekannt'}.`;
       }
       setErrorMsg(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleQuickRegister = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsLoading(true);
+    const trimmedEmail = email.trim().toLowerCase();
+    try {
+      await registerWithEmail(trimmedEmail, password);
+      setSuccessMsg('Konto erfolgreich erstellt! Sie sind nun angemeldet.');
+      if (onSyncLocalData) onSyncLocalData();
+      setTimeout(() => onClose(), 1200);
+    } catch (err: any) {
+      setErrorMsg(`Registrierung fehlgeschlagen: ${err.message || 'Unbekannter Fehler'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleQuickLogin = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsLoading(true);
+    const trimmedEmail = email.trim().toLowerCase();
+    try {
+      await loginWithEmail(trimmedEmail, password);
+      setSuccessMsg('Erfolgreich angemeldet!');
+      if (onSyncLocalData) onSyncLocalData();
+      setTimeout(() => onClose(), 1200);
+    } catch (err: any) {
+      setErrorMsg(`Anmeldung fehlgeschlagen: Falsches Passwort für ${trimmedEmail}.`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setErrorMsg('Bitte geben Sie zuerst Ihre E-Mail-Adresse oben ein.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await resetPassword(trimmedEmail);
+      setSuccessMsg(`Passwort-Zurücksetzungs-E-Mail wurde an ${trimmedEmail} gesendet! Bitte prüfen Sie auch Ihren Spam-Ordner.`);
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      setErrorMsg('Fehler beim Senden der Rücksetzungs-E-Mail: ' + (err.message || 'Unbekannt'));
     } finally {
       setIsLoading(false);
     }
@@ -112,7 +194,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }, 1200);
     } catch (err: any) {
       console.error('Google Auth Error:', err);
-      setErrorMsg('Google-Anmeldung fehlgeschlagen oder abgebrochen.');
+      if (err?.message?.includes('deleted_client') || err?.code === 'auth/invalid-credential' || err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/popup-blocked') {
+        setErrorMsg('Google-Login ist auf Mobilgeräten nicht aktiv. Bitte nutzen Sie einfach die kostenlose E-Mail & Passwort Registrierung/Anmeldung oben!');
+      } else {
+        setErrorMsg('Google-Anmeldung fehlgeschlagen. Bitte nutzen Sie E-Mail & Passwort.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -148,7 +234,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {user ? 'Cloud-Konto & Synchronisation' : (isRegisterMode ? 'Kostenlos Registrieren' : 'Anmelden')}
               </h2>
               <p className="text-xs text-slate-400">
-                {user ? 'Ihre Münzsammlung ist sicher im Netz gespeichert.' : 'Nutzen Sie Numisma auf allen Geräten & im Restaurant.'}
+                {user ? 'Ihre Münzsammlung ist sicher im Netz gespeichert.' : 'Nutzen Sie inumis.app auf allen Ihren Geräten.'}
               </p>
             </div>
           </div>
@@ -246,9 +332,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{errorMsg}</span>
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                  {canAutoRegister && (
+                    <button
+                      type="button"
+                      onClick={handleQuickRegister}
+                      disabled={isLoading}
+                      className="w-full mt-1.5 py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Konto jetzt neu registrieren mit diesen Daten</span>
+                    </button>
+                  )}
+                  {canAutoLogin && (
+                    <button
+                      type="button"
+                      onClick={handleQuickLogin}
+                      disabled={isLoading}
+                      className="w-full mt-1.5 py-2 px-3 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Mit diesem Passwort anmelden</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -279,39 +389,66 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Passwort
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-slate-300">
+                      Passwort
+                    </label>
+                    {!isRegisterMode && (
+                      <button
+                        type="button"
+                        onClick={handlePasswordReset}
+                        disabled={isLoading}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 underline transition-colors cursor-pointer"
+                      >
+                        Passwort vergessen?
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
                       minLength={6}
-                      className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+                      className="w-full pl-9 pr-10 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-2.5 p-1 text-slate-400 hover:text-slate-200 transition-colors"
+                      title={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 
                 {isRegisterMode && (
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Passwort bestätigen
+                      Passwort bestätigen (optional)
                     </label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                       <input
-                        type="password"
+                        type={showConfirmPassword ? 'text' : 'password'}
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
+                        placeholder="•••••••• (oder leer lassen)"
                         minLength={6}
-                        className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+                        className="w-full pl-9 pr-10 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-2.5 p-1 text-slate-400 hover:text-slate-200 transition-colors"
+                        title={showConfirmPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -363,7 +500,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-slate-800 bg-[#121318] text-center text-[11px] text-slate-500">
-          Numisma Cloud-Sync • Gesichert via Google Firebase Firestore
+          inumis.app Cloud-Sync • Gesichert via Google Firebase Firestore
         </div>
 
       </div>

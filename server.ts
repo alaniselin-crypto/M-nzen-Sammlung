@@ -15,6 +15,50 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
   app.use(express.text({ limit: "15mb", type: "*/*" }));
 
+  // Helper to convert base64 data URIs or http(s) image URLs into Gemini inlineData format
+  async function fetchImagePart(urlOrBase64?: string): Promise<{ mimeType: string; data: string } | null> {
+    if (!urlOrBase64 || typeof urlOrBase64 !== "string") return null;
+    const trimmed = urlOrBase64.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith("data:image/")) {
+      const matches = trimmed.match(/^data:(image\/[a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
+      if (matches) {
+        return { mimeType: matches[1], data: matches[2] };
+      }
+    }
+
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      try {
+        const directUrl = formatGoogleDriveUrl(trimmed);
+        const resp = await fetch(directUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
+        if (resp.ok) {
+          const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+          // Strictly avoid HTML / JSON error pages being sent as JPEG to Gemini
+          if (contentType.includes("html") || contentType.includes("json")) {
+            return null;
+          }
+          const arrayBuffer = await resp.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          if (buffer.length < 500) return null; // Too small for valid coin image
+
+          let mimeType = contentType.split(";")[0].trim();
+          if (!mimeType.startsWith("image/")) {
+            mimeType = "image/jpeg";
+          }
+          return {
+            mimeType,
+            data: buffer.toString("base64"),
+          };
+        }
+      } catch (err) {
+        console.error("Failed to fetch image URL for Gemini:", trimmed, err);
+      }
+    }
+
+    return null;
+  }
+
   // API Endpoint: AI Coin Title & Description Generation
   app.post("/api/generate-coin-info", async (req, res) => {
     try {
@@ -45,55 +89,80 @@ async function startServer() {
         condition,
         notes,
         imageUrl,
+        reverseImageUrl,
       } = req.body;
 
       const promptParts: any[] = [];
+      let imageContextNotice = "";
+
+      // Fetch Vorderseite (Avers) image
+      const frontPart = await fetchImagePart(imageUrl);
+      if (frontPart) {
+        promptParts.push({
+          inlineData: frontPart,
+        });
+        imageContextNotice += "\n- Bild 1: Vorderseite (Avers) der Münze/Banknote ist beigefügt.";
+      }
+
+      // Fetch Rückseite (Revers) image
+      const backPart = await fetchImagePart(reverseImageUrl);
+      if (backPart) {
+        promptParts.push({
+          inlineData: backPart,
+        });
+        imageContextNotice += "\n- Bild 2: Rückseite (Revers) der Münze/Banknote ist ebenfalls beigefügt.";
+      }
 
       let contextText = `Du bist ein hochqualifizierter Numismatiker, Historiker und Experte für Münzen und Banknoten.
-Aufgabe: Erstelle anhand der gegebenen Merkmale einen präzisen, professionellen Auktions-/Sammlertitel (Name) und eine strukturierte, ausführliche und fesselnde Beschreibung für eine Sammlungs-App.
 
-Merkmale des Sammlungsstücks:
-- Objekt-Typ: ${itemType === "banknote" ? "Banknote / Papiergeld" : "Münze"}
-- Herkunftsland / Gebiet: ${country || "Unbekannt"}
-- Prägejahr / Ausgabejahr: ${year || "Unbekannt"}
-- Nennwert: ${faceValue || ""} ${currency || "CHF"}
-- Material / Metall: ${material || "Nicht angegeben"}
-- Prägezeichen / Münzzeichen: ${mintMark || "Nicht angegeben"}
-- Erhaltungsgrad: ${condition || "Nicht angegeben"}
-- Stichworte / Bisherige Notizen: ${notes || "Keine"}
+STRENGSTE UND ABSOLUTE DIREKTIVE:
+Stütze dich EXKLUSIV und AUSSCHLIESSLICH auf die visuellen Merkmale der beigefügten BILDER (Vorderseite / Avers UND Rückseite / Revers)!
+IGNORIERE ALLE VORGEGEBENEN FORMULAR- UND TEXTFELDER VOLLSTÄNDIG!
+Achte besonders darauf, den Nennwert (z.B. '5' bei 5 Franken / 5 CHF, '2' bei 2 Fr., '20', etc.) und das Prägejahr (z.B. 1968, 1932, etc.) EXAKT von den Aufschriften und Prägungen auf dem Bild abzulesen.
 
-Erstelle eine Antwort im folgenden JSON-Format:
+Visuelle Pflichtkriterien:
+1. Nennwert & Währung: Lies die Ziffer und Währung direkt aus dem Münz-/Banknotenbild ab. Wenn '5 Fr.', '5 CHF' oder eine große '5' zu sehen ist, antworte mit faceValue: "5" und currency: "CHF" (oder entsprechende Währung). Übernimm NIEMALS pauschal '1'.
+2. Prägejahr (year): Lies die Jahreszahl exakt von der Münze/Banknote ab.
+3. Herkunftsland (country): Bestimme das Land anhand der Inschriften (z.B. 'HELVETIA', 'CONFEDERATIO HELVETICA' -> Schweiz, 'DEUTSCHES REICH' -> Deutschland, 'RZECZPOSPOLITA POLSKA' -> Polen) oder anhand des Wappens.
+4. Material (material): Bestimme das Metall (Silber, Gold, Kupfer-Nickel, Bronze) visuell aus Prägung und Farbe.
+5. Titel (title): Erstelle einen präzisen Titel nach dem Schema '[Nennwert] [Währung] [Land] [Jahr] [Motiv/Besonderheit]', z.B. '5 CHF Schweiz 1968 Helvetia' oder '5 Franken Schweiz 1932 Alphirt'.
+
+Erstelle deine Antwort im folgenden JSON-Format:
 {
-  "title": "Kompakter, eleganter Titel für das Sammlungsstück (z.B. '5 Franken Schweiz 1935 B (Vreneli Goldmünze)' oder '100 Euro Deutschland 2002 UNESCO')",
-  "description": "Strukturierte, informative Beschreibung mit historischem Hintergrund, Designmerkmalen (Avers & Revers), Prägestätte, Seltenheit und Besonderheiten auf Deutsch."
+  "title": "Titel rein basierend auf dem Bild",
+  "country": "Erkanntes Herkunftsland aus Bild",
+  "year": 1968,
+  "faceValue": "5",
+  "currency": "CHF",
+  "material": "Silber",
+  "description": "Präzise, strukturierte numismatische Beschreibung basierend auf den sichtbaren Avers- und Revers-Details, Inschriften, Wappen und historische Einordnung auf Deutsch."
 }`;
-
-      if (imageUrl && typeof imageUrl === "string" && imageUrl.startsWith("data:image/")) {
-        const matches = imageUrl.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
-        if (matches) {
-          const mimeType = matches[1];
-          const base64Data = matches[2];
-          promptParts.push({
-            inlineData: {
-              mimeType,
-              data: base64Data,
-            },
-          });
-          contextText += "\n\nEin Bild der Münze/Banknote ist ebenfalls beigefügt. Beziehe sichtbare Inschriften, Motive oder Erhaltungsmerkmale vom Bild in den Titel und die Beschreibung ein.";
-        }
-      }
 
       promptParts.push({ text: contextText });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: { parts: promptParts },
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+      let responseText = "";
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3.6-flash",
+          contents: { parts: promptParts },
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+        responseText = response.text || "";
+      } catch (imageErr: any) {
+        console.warn("Gemini build with images failed, falling back to text prompt:", imageErr?.message);
+        // Fallback: If image inlineData failed (e.g. invalid image format), retry text-only prompt!
+        const textOnlyResponse = await ai.models.generateContent({
+          model: "gemini-3.6-flash",
+          contents: contextText,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+        responseText = textOnlyResponse.text || "";
+      }
 
-      const responseText = response.text;
       if (!responseText) {
         return res.status(500).json({ error: "Keine Antwort von Gemini AI erhalten." });
       }
@@ -102,11 +171,16 @@ Erstelle eine Antwort im folgenden JSON-Format:
         const parsed = JSON.parse(responseText);
         return res.json({
           title: parsed.title || "",
+          country: parsed.country || "",
+          year: parsed.year || null,
+          faceValue: parsed.faceValue || "",
+          currency: parsed.currency || "",
+          material: parsed.material || "",
           description: parsed.description || "",
         });
       } catch (e) {
         return res.json({
-          title: `${faceValue || ""} ${currency || "CHF"} ${country || ""} ${year || ""}`.trim(),
+          title: `${faceValue || ""} ${currency || "CHF"} ${country || ""} ${year || ""}`.trim() || "TITEL",
           description: responseText,
         });
       }
@@ -146,7 +220,8 @@ let pendingWebhookCoins: any[] = loadPendingWebhooks();
 function formatGoogleDriveUrl(url: string): string {
   if (!url) return "";
   const str = String(url).trim();
-  if (/^[a-zA-Z0-9_-]{25,}$/.test(str)) {
+  if (str.startsWith('https://lh3.googleusercontent.com/d/')) return str;
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(str)) {
     return `https://lh3.googleusercontent.com/d/${str}`;
   }
   const match = str.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
@@ -162,23 +237,30 @@ function formatGoogleDriveUrl(url: string): string {
   app.all("/api/webhook/make", (req, res) => {
     try {
       let rawData = req.body;
-      if (typeof rawData === "string" && rawData.trim().startsWith("{")) {
-        try { rawData = JSON.parse(rawData); } catch {}
-      } else if (typeof rawData === "string" && rawData.trim().startsWith("[")) {
-        try { rawData = JSON.parse(rawData); } catch {}
+      if (typeof rawData === "string") {
+        const trimmedStr = rawData.trim();
+        if (trimmedStr.startsWith("{") || trimmedStr.startsWith("[")) {
+          try { rawData = JSON.parse(trimmedStr); } catch {}
+        }
       }
 
-      if (!rawData || (typeof rawData === "object" && Object.keys(rawData).length === 0)) {
+      if (!rawData || (typeof rawData === "object" && !Array.isArray(rawData) && Object.keys(rawData).length === 0)) {
         rawData = req.query;
       }
 
       let payload = rawData;
-      if (payload && typeof payload === "object") {
-        if (payload.body) payload = payload.body;
-        else if (payload.data) payload = payload.data;
-        else if (payload.payload) payload = payload.payload;
-        else if (payload.items) payload = payload.items;
-        else if (payload.files) payload = payload.files;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        // Only unwrap if payload doesn't directly contain coin/file properties
+        const hasDirectCoinFields = Object.keys(payload).some(k => 
+          ['name', 'title', 'bezeichnung', 'filename', 'fileName', 'webcontentlink', 'imageurl', 'url', 'image'].includes(k.toLowerCase())
+        );
+        if (!hasDirectCoinFields) {
+          if (payload.body && (typeof payload.body === "object" || Array.isArray(payload.body))) payload = payload.body;
+          else if (payload.data && (typeof payload.data === "object" || Array.isArray(payload.data))) payload = payload.data;
+          else if (payload.payload && (typeof payload.payload === "object" || Array.isArray(payload.payload))) payload = payload.payload;
+          else if (payload.items && Array.isArray(payload.items)) payload = payload.items;
+          else if (payload.files && Array.isArray(payload.files)) payload = payload.files;
+        }
       }
 
       const items = Array.isArray(payload) ? payload : [payload];
@@ -186,23 +268,21 @@ function formatGoogleDriveUrl(url: string): string {
 
       const processed: any[] = [];
 
-      for (const item of items) {
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
         if (!item) continue;
 
         let nameVal = '';
         let rawUrl = '';
 
         if (typeof item === "string") {
-          // Attempt to extract URL and filename from plain string payload
           const urlMatch = item.match(/(https?:\/\/[^\s"]+)/i) || item.match(/([a-zA-Z0-9_-]{25,})/);
           if (urlMatch) {
             rawUrl = urlMatch[0];
           }
-          // Remove URL from string to get name
           const cleanText = item.replace(/(https?:\/\/[^\s"]+)/gi, '').trim();
-          nameVal = cleanText || 'Unbenannte Münze';
+          nameVal = cleanText || `Drive Datei ${Date.now()}-${idx + 1}`;
         } else {
-          // Helper to get property case-insensitively
           const getItemProp = (...keys: string[]) => {
             if (typeof item !== 'object' || !item) return '';
             const lowerKeys = keys.map(k => k.toLowerCase());
@@ -214,50 +294,70 @@ function formatGoogleDriveUrl(url: string): string {
             return '';
           };
 
-          nameVal = getItemProp('name', 'title', 'bezeichnung', 'filename', 'fileName', 'originalFileName', 'file_name', 'file', 'Name', 'Title') || 'Unbenannte Münze';
+          nameVal = getItemProp('name', 'title', 'bezeichnung', 'filename', 'fileName', 'originalFileName', 'file_name', 'file', 'Name', 'Title') || `Drive Import #${idx + 1}`;
           rawUrl = getItemProp('imageUrl', 'image', 'bild', 'image1_url', 'webContentLink', 'web_content_link', 'webViewLink', 'web_view_link', 'downloadUrl', 'download_url', 'fileUrl', 'file_url', 'url', 'Url', 'thumbnailLink', 'thumbnail_link', 'directLink', 'link', 'WebContentLink', 'WebViewLink', 'WebContentUrl', 'id', 'fileId', 'file_id', 'File ID') || '';
         }
 
-        const rawName = String(nameVal).replace(/\.(jpg|jpeg|png|webp|gif|svg|heic)$/i, '');
         rawUrl = formatGoogleDriveUrl(rawUrl);
 
-        // Detect _f (Vorderseite) or _h / _r (Rückseite)
-        const isReverse = /(_h|_r|_back|_rueckseite|_hinten)$/i.test(rawName);
-        const isFront = /(_f|_v|_front|_vorderseite)$/i.test(rawName);
+        let clean = String(nameVal).trim().replace(/\.(jpg|jpeg|png|webp|gif|svg|heic)+$/gi, '').trim();
+        clean = clean.replace(/[\s_-]*(\(\d+\)|\[\d+\]|copy)$/gi, '').trim();
 
-        // Strip suffix to get base coin name (e.g. MZ_2545)
-        const baseName = rawName.replace(/(_f|_v|_h|_r|_front|_vorderseite|_back|_rueckseite|_hinten)$/i, '');
+        const isReverse = 
+          /([_\.\-\s](h|r|b|2|back|revers|rueckseite|rückseite|hinten))$/i.test(clean) ||
+          /\b(revers|rueckseite|rückseite|back|hinten)\b/i.test(clean);
 
-        let existingCoin = processed.find(c => c.name === baseName) || pendingWebhookCoins.find(c => c.name === baseName);
+        let baseKey = clean
+          .replace(/[_\.\-\s]+(f|v|a|h|r|b|front|vorderseite|back|rueckseite|rückseite|hinten|avers|revers|1|2)$/i, '')
+          .replace(/\b(avers|vorderseite|front|revers|rueckseite|rückseite|back|hinten)\b/gi, '')
+          .replace(/_/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+        const lowerKey = baseKey || clean.toLowerCase();
+
+        let existingCoin = processed.find(c => (c.rawBaseName && c.rawBaseName.toLowerCase() === lowerKey) || (c.name && c.name.toLowerCase() === lowerKey)) 
+          || pendingWebhookCoins.find(c => (c.rawBaseName && c.rawBaseName.toLowerCase() === lowerKey) || (c.name && c.name.toLowerCase() === lowerKey));
 
         if (existingCoin) {
           if (isReverse) {
             existingCoin.reverseImageUrl = rawUrl;
-          } else if (isFront) {
-            existingCoin.imageUrl = rawUrl;
+            if (!existingCoin.imageUrl && !isReverse) {
+              existingCoin.imageUrl = rawUrl;
+            }
           } else {
-            if (!existingCoin.imageUrl) existingCoin.imageUrl = rawUrl;
-            else if (!existingCoin.reverseImageUrl) existingCoin.reverseImageUrl = rawUrl;
+            if (!existingCoin.imageUrl) {
+              existingCoin.imageUrl = rawUrl;
+            } else if (!existingCoin.reverseImageUrl) {
+              existingCoin.reverseImageUrl = rawUrl;
+            }
           }
         } else {
+          let initialTitle = (item && typeof item === 'object' && (item.title || item.bezeichnung)) ? String(item.title || item.bezeichnung).trim() : '';
+          if (!initialTitle || initialTitle === 'Münze (Make)' || initialTitle.toLowerCase().startsWith('drive import') || initialTitle.toLowerCase().startsWith('unbenannt')) {
+            initialTitle = 'TITEL';
+          }
+
           const newCoin = {
-            id: item.id || `make-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            name: baseName,
-            country: item.country || item.land || 'Schweiz',
-            year: Number(item.year || item.jahr) || new Date().getFullYear(),
-            faceValue: item.faceValue || item.nennwert || '1',
-            currency: item.currency || item.waehrung || 'CHF',
-            itemType: item.itemType || item.typ || 'coin',
-            material: item.material || 'Silber',
-            mintMark: item.mintMark || item.praegezeichen || '',
-            condition: item.condition || item.erhaltung || 'Sehr gut',
-            rarity: item.rarity || item.seltenheit || 'Sehr häufig (Common)',
-            purchasePrice: Number(item.purchasePrice || item.kaufpreis) || 0,
-            currentValue: Number(item.currentValue || item.marktwert || item.wert) || 0,
-            notes: item.notes || item.bemerkungen || item.beschreibung || '',
-            imageUrl: isReverse ? (item.imageUrl || item.image || rawUrl) : rawUrl,
-            reverseImageUrl: isReverse ? rawUrl : (item.reverseImageUrl || item.rueckseite || item.image2_url || ''),
-            folder: item.folder || item.kategorie || 'Google Drive Import',
+            id: (item && typeof item === 'object' && item.id) ? String(item.id) : `make-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            rawBaseName: baseKey,
+            name: initialTitle || 'TITEL',
+            country: (item && typeof item === 'object' ? item.country || item.land : '') || 'Schweiz',
+            year: (item && typeof item === 'object' ? Number(item.year || item.jahr) : 0) || new Date().getFullYear(),
+            faceValue: (item && typeof item === 'object' ? item.faceValue || item.nennwert : '') || '1',
+            currency: (item && typeof item === 'object' ? item.currency || item.waehrung : '') || 'CHF',
+            itemType: (item && typeof item === 'object' ? item.itemType || item.typ : '') || 'coin',
+            material: (item && typeof item === 'object' ? item.material : '') || 'Silber',
+            mintMark: (item && typeof item === 'object' ? item.mintMark || item.praegezeichen : '') || '',
+            condition: (item && typeof item === 'object' ? item.condition || item.erhaltung : '') || 'Sehr gut',
+            rarity: (item && typeof item === 'object' ? item.rarity || item.seltenheit : '') || 'Sehr häufig (Common)',
+            purchasePrice: (item && typeof item === 'object' ? Number(item.purchasePrice || item.kaufpreis) : 0) || 0,
+            currentValue: (item && typeof item === 'object' ? Number(item.currentValue || item.marktwert || item.wert) : 0) || 0,
+            notes: (item && typeof item === 'object' ? item.notes || item.bemerkungen || item.beschreibung : '') || '',
+            imageUrl: isReverse ? '' : rawUrl,
+            reverseImageUrl: isReverse ? rawUrl : '',
+            folder: (item && typeof item === 'object' ? item.folder || item.kategorie : '') || 'Google Drive Import',
             createdAt: new Date().toISOString()
           };
           processed.push(newCoin);
@@ -266,14 +366,16 @@ function formatGoogleDriveUrl(url: string): string {
 
       if (processed.length > 0) {
         pendingWebhookCoins.push(...processed);
-        savePendingWebhooks(pendingWebhookCoins);
       }
+
+      // Always persist pending webhooks to file!
+      savePendingWebhooks(pendingWebhookCoins);
 
       console.log(`[Webhook Make] Akkumulierte pendente Münzen (${pendingWebhookCoins.length}):`, pendingWebhookCoins);
 
       return res.status(200).json({
         success: true,
-        message: `${items.length} Element(e) verarbeitet. ${processed.length} Münze(n) im Import-Puffer.`,
+        message: `${items.length} Element(e) verarbeitet. ${processed.length} neue Münze(n) im Import-Puffer. Gesamt: ${pendingWebhookCoins.length}`,
         processedCount: processed.length,
         totalPending: pendingWebhookCoins.length
       });
@@ -286,14 +388,28 @@ function formatGoogleDriveUrl(url: string): string {
     }
   });
 
-  // GET Endpoint to fetch and drain pending webhook coins into the client app
+  // GET Endpoint to fetch pending webhook coins
   app.get("/api/webhook/make/pending", (req, res) => {
+    const shouldClear = req.query.clear === 'true' || req.query.clear === '1';
     const items = [...pendingWebhookCoins];
-    pendingWebhookCoins = []; // Drain queue
-    savePendingWebhooks([]);
+    if (shouldClear) {
+      pendingWebhookCoins = [];
+      savePendingWebhooks([]);
+    }
     return res.json({
       count: items.length,
       items
+    });
+  });
+
+  // POST/ALL Endpoint to acknowledge and clear pending webhook coins after successful save
+  app.all("/api/webhook/make/clear", (req, res) => {
+    const count = pendingWebhookCoins.length;
+    pendingWebhookCoins = [];
+    savePendingWebhooks([]);
+    return res.json({
+      success: true,
+      clearedCount: count
     });
   });
 

@@ -38,6 +38,7 @@ export interface Coin {
   mintage?: string; // Auflagezahl
   imageUrl?: string; // Vorderseite (Avers)
   reverseImageUrl?: string; // Rückseite (Revers)
+  rawBaseName?: string; // Für Bildzuordnung (Avers & Revers Pairing)
   isFavorite?: boolean;
   
   // Verkauf & Plattformen (Sales Tracking)

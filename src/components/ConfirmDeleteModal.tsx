@@ -1,6 +1,7 @@
 import React from 'react';
 import { Trash2, AlertTriangle, X } from 'lucide-react';
 import { Coin } from '../types';
+import { CoinAvatar } from './CoinAvatar';
 
 interface ConfirmDeleteModalProps {
   isOpen: boolean;
@@ -49,17 +50,15 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
         {/* Content */}
         <div className="p-6 space-y-4">
           <div className="flex items-center space-x-4 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
-            {coin.imageUrl ? (
-              <img
-                src={coin.imageUrl}
-                alt={coin.name}
-                className="w-14 h-14 rounded-full object-cover border-2 border-amber-500/40 shrink-0"
-              />
-            ) : (
-              <div className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center text-amber-400 shrink-0 font-bold text-xs">
-                {coin.catalogNumber ? `#${coin.catalogNumber}` : 'Münze'}
-              </div>
-            )}
+            <CoinAvatar
+              imageUrl={coin.imageUrl}
+              name={coin.name}
+              faceValue={coin.faceValue}
+              currency={coin.currency}
+              material={coin.material}
+              isBanknote={coin.itemType === 'banknote'}
+              size="sm"
+            />
             <div className="min-w-0 flex-1">
               <div className="text-xs text-amber-400 font-mono font-semibold">
                 #{coin.catalogNumber || '---'}

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Edit2, Trash2, Star, TrendingUp, TrendingDown, MapPin, Calendar, Coins, ShieldAlert, Sparkles, Scale, Maximize2, Folder, Copy, Hash, ZoomIn, ZoomOut, RotateCw, ShoppingBag, Tag, CheckCircle2, ExternalLink, Banknote, Crown, Layers } from 'lucide-react';
 import { Coin } from '../types';
 import { CoinAvatar } from './CoinAvatar';
-import { formatCurrency, getConditionLabel } from '../utils/storage';
+import { formatCurrency, getConditionLabel, formatSKU, getCoinTitle } from '../utils/storage';
 import { getRarityOption } from '../data/rarities';
 
 interface CoinDetailModalProps {
@@ -51,7 +51,7 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
               {coin.catalogNumber && (
                 <span className="px-2.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold flex items-center gap-1">
                   <Hash className="w-3.5 h-3.5 text-amber-400" />
-                  Nr. #{coin.catalogNumber}
+                  SKU #{formatSKU(coin.catalogNumber)}
                 </span>
               )}
               <span className={`px-2.5 py-0.5 rounded text-xs font-bold border ${cond.color}`}>
@@ -168,7 +168,7 @@ export const CoinDetailModal: React.FC<CoinDetailModalProps> = ({
             {/* Title & Key Data */}
             <div className="space-y-3">
               <h2 className="text-2xl sm:text-3xl font-bold font-serif text-amber-300 leading-snug">
-                {coin.name}
+                {getCoinTitle(coin)}
               </h2>
 
               <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
