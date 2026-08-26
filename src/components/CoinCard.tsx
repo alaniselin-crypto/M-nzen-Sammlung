@@ -74,6 +74,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="sm"
+                className="!object-contain !object-center"
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
@@ -229,6 +230,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="md"
+                className="!object-contain !object-center"
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
