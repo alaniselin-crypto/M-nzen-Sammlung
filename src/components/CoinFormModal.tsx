@@ -445,7 +445,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   material={formData.material}
                   isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
                   size="lg"
-                  className="!w-auto !h-auto max-w-full max-h-52 sm:max-h-64 !rounded-none !border-0 !shadow-none !object-contain !object-center mx-auto shrink-0"
+                  className="!w-52 !h-52 sm:!w-64 sm:!h-64 !rounded-xl !border !border-amber-500/30 !shadow-none !object-contain !object-center bg-[#140f0d] shrink-0"
                 />
                 <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
@@ -496,7 +496,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   material={formData.material}
                   isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
                   size="lg"
-                  className="!w-auto !h-auto max-w-full max-h-52 sm:max-h-64 !rounded-none !border-0 !shadow-none !object-contain !object-center mx-auto shrink-0"
+                  className="!w-52 !h-52 sm:!w-64 sm:!h-64 !rounded-xl !border !border-amber-500/30 !shadow-none !object-contain !object-center bg-[#140f0d] shrink-0"
                 />
                 <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
