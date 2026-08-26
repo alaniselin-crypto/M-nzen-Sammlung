@@ -437,7 +437,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             </div>
             {formData.imageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-xl border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
+                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-full overflow-hidden border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
                   <CoinAvatar
                     imageUrl={formData.imageUrl}
                     name={formData.name || 'Vorderseite Vorschau'}
@@ -490,7 +490,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             </div>
             {formData.reverseImageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-xl border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
+                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-full overflow-hidden border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
                   <CoinAvatar
                     imageUrl={formData.reverseImageUrl}
                     name={formData.name || 'Rückseite Vorschau'}
