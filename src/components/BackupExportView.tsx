@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, ShieldCheck, FileText } from 'lucide-react';
+import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, ShieldCheck, FileText, ImagePlus } from 'lucide-react';
 import { Coin } from '../types';
-import { exportCoinsToCSV, downloadCSVFile, parseCSVToCoins, downloadCSVTemplate } from '../utils/csv';
+import { exportCoinsToCSV, downloadCSVFile, parseCSVToCoins, downloadCSVTemplate, parseImageSideAndBaseName } from '../utils/csv';
 
 interface BackupExportViewProps {
   coins: Coin[];
@@ -21,6 +21,138 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
   const [replaceMode, setReplaceMode] = useState<boolean>(false);
   const [showConfirmClear, setShowConfirmClear] = useState<boolean>(false);
   const [showConfirmReset, setShowConfirmReset] = useState<boolean>(false);
+  const [isImageImporting, setIsImageImporting] = useState<boolean>(false);
+
+  // Compress image file to base64 data URI (max 800px, JPEG 85%)
+  const compressImageFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 800;
+          let w = img.width, h = img.height;
+          if (w > MAX_SIZE || h > MAX_SIZE) {
+            if (w > h) { h = Math.round(h * MAX_SIZE / w); w = MAX_SIZE; }
+            else { w = Math.round(w * MAX_SIZE / h); h = MAX_SIZE; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => reject(new Error(`Bild konnte nicht geladen werden: ${file.name}`));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error(`Datei konnte nicht gelesen werden: ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Batch image import handler
+  const handleBatchImageImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsImageImporting(true);
+    setImportErrors([]);
+    setImportSuccessMsg('');
+
+    try {
+      const imageFiles = Array.from(files as FileList).filter((f: File) => f.type.startsWith('image/'));
+      if (imageFiles.length === 0) {
+        setImportErrors(['Keine Bilddateien gefunden. Bitte wählen Sie JPG, PNG oder WebP Dateien.']);
+        setIsImageImporting(false);
+        return;
+      }
+
+      // Group files by base name (pair front/back)
+      const groups = new Map<string, { front?: { file: File; base64: string }; back?: { file: File; base64: string } }>();
+
+      for (const file of imageFiles) {
+        try {
+          const base64 = await compressImageFile(file);
+          const parsed = parseImageSideAndBaseName(file.name);
+          const key = parsed.baseKey || file.name.replace(/\.[^.]+$/, '').toLowerCase();
+
+          if (!groups.has(key)) {
+            groups.set(key, {});
+          }
+          const group = groups.get(key)!;
+
+          if (parsed.isReverse) {
+            group.back = { file, base64 };
+          } else if (group.front) {
+            group.back = { file, base64 };
+          } else {
+            group.front = { file, base64 };
+          }
+        } catch (err: any) {
+          setImportErrors(prev => [...prev, err.message]);
+        }
+      }
+
+      // Create coins from groups, skipping already imported ones
+      const existingKeys = new Set(coins.map(c => (c.rawBaseName || '').toLowerCase()).filter(Boolean));
+      const newCoins: Coin[] = [];
+      let skippedCount = 0;
+
+      groups.forEach((group, key) => {
+        if (existingKeys.has(key.toLowerCase())) {
+          skippedCount++;
+          return;
+        }
+
+        const coin: Coin = {
+          id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          name: 'TITEL',
+          country: '',
+          year: 0,
+          faceValue: '',
+          currency: '',
+          condition: '' as any,
+          purchasePrice: 0,
+          currentValue: 0,
+          purchaseDate: '',
+          notes: '',
+          imageUrl: group.front?.base64 || '',
+          reverseImageUrl: group.back?.base64 || '',
+          storageLocation: '',
+          catalogNumber: '',
+          isFavorite: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          itemType: 'coin',
+          material: '',
+          mintMark: '',
+          weight: '',
+          diameter: '',
+          mintage: '',
+          rarity: '',
+          rawBaseName: key,
+        };
+        newCoins.push(coin);
+      });
+
+      if (newCoins.length > 0) {
+        onImportCoins(newCoins, false); // Always merge, don't replace
+        setImportSuccessMsg(
+          `✅ ${newCoins.length} neue Münze(n) importiert${skippedCount > 0 ? ` (${skippedCount} bereits vorhandene übersprungen)` : ''}. Öffnen Sie jede neue Münze und klicken Sie "KI-Erkennung".`
+        );
+      } else if (skippedCount > 0) {
+        setImportSuccessMsg(
+          `ℹ️ Alle ${skippedCount} ausgewählten Bilder sind bereits in Ihrer Sammlung vorhanden.`
+        );
+      }
+    } catch (err: any) {
+      setImportErrors(prev => [...prev, `Fehler beim Import: ${err.message}`]);
+    } finally {
+      setIsImageImporting(false);
+      e.target.value = '';
+    }
+  };
 
   const handleExport = () => {
     const csvData = exportCoinsToCSV(coins);
@@ -167,6 +299,56 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
         </div>
       </div>
 
+      {/* Batch Image Import Card */}
+      <div className="bg-[#181a22] border border-emerald-500/30 hover:border-emerald-500/50 rounded-2xl p-6 shadow-xl space-y-4">
+        <div className="flex items-start gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <ImagePlus className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-bold font-serif text-emerald-200 flex items-center gap-2">
+              📸 Direkter Bilder-Stapelimport
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Wählen Sie Münzbilder direkt von Ihrem Computer oder Smartphone aus. Jedes Bild wird als neue Münze importiert.
+              Danach öffnen Sie jede Münze und klicken <strong className="text-emerald-300">"KI-Erkennung"</strong> – die KI füllt alle Felder automatisch aus.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 space-y-1">
+          <div>✅ Unterstützt: JPG, PNG, WebP, GIF</div>
+          <div>✅ Vorder- & Rückseite: Dateien mit <code className="text-emerald-300">_v</code>, <code className="text-emerald-300">_r</code>, <code className="text-emerald-300">_front</code>, <code className="text-emerald-300">_back</code> werden automatisch gepaart</div>
+          <div>✅ Bilder werden komprimiert und direkt in der App gespeichert</div>
+        </div>
+
+        <label className={`cursor-pointer flex items-center justify-center gap-2 w-full py-3.5 px-4 text-sm font-bold rounded-xl shadow-lg transition-all active:scale-95 ${
+          isImageImporting
+            ? 'text-slate-400 bg-slate-800 border border-slate-700 cursor-wait'
+            : 'text-slate-950 bg-gradient-to-r from-emerald-400 via-emerald-300 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 shadow-emerald-500/20'
+        }`}>
+          {isImageImporting ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Bilder werden importiert...</span>
+            </>
+          ) : (
+            <>
+              <ImagePlus className="w-5 h-5 stroke-[2.5]" />
+              <span>Münzbilder Auswählen & Importieren</span>
+            </>
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleBatchImageImport}
+            disabled={isImageImporting}
+            className="hidden"
+          />
+        </label>
+      </div>
+
       {/* Notifications / Feedback Messages */}
       {importSuccessMsg && (
         <div className="p-4 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-3">
@@ -174,87 +356,6 @@ export const BackupExportView: React.FC<BackupExportViewProps> = ({
           <span>{importSuccessMsg}</span>
         </div>
       )}
-
-      {/* Make.com / Integromat Integration Section */}
-      <div className="bg-[#181a22] border border-purple-500/30 hover:border-purple-500/50 rounded-2xl p-6 shadow-xl space-y-5">
-        <div className="flex items-start justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold text-lg">
-              M
-            </div>
-            <div>
-              <h3 className="text-lg font-bold font-serif text-purple-200 flex items-center gap-2">
-                Make.com (Integromat) Schnittstelle
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Automatisierter Massen-Import & Synchronisation mit Google Sheets, Excel 365, Ricardo oder Notions via Webhooks.
-              </p>
-            </div>
-          </div>
-          <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px] font-semibold">
-            Schnittstelle Bereit
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300">
-          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
-            <div className="font-bold text-purple-300 uppercase tracking-wider text-[11px]">
-              1. Massen-Import via Make CSV/JSON
-            </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              Erstellen Sie in Make.com ein Szenario (z.B. Google Sheets → Custom Webhook), das Datensätze im Standard-CSV- oder JSON-Format an Ihre Sammlung übergibt.
-            </p>
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 font-mono text-[10px] text-purple-200 overflow-x-auto">
-              {"{ catalogNumber, name, country, year, condition, faceValue, material: 'Cu-Ni'|'Ag', notes }"}
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
-            <div className="font-bold text-purple-300 uppercase tracking-wider text-[11px]">
-              2. Make Webhook Export Trigger
-            </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              Tragen Sie Ihre Make Custom Webhook URL ein, um alle {coins.length} Münz-Datensätze per Mausklick an Ihr Make.com Szenario zu senden.
-            </p>
-            <div className="flex gap-2 pt-1">
-              <input
-                type="url"
-                placeholder="https://hook.eu1.make.com/your-custom-webhook"
-                id="makeWebhookUrl"
-                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-purple-200 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
-              />
-              <button
-                onClick={() => {
-                  const input = document.getElementById('makeWebhookUrl') as HTMLInputElement;
-                  const url = input?.value?.trim();
-                  if (!url) {
-                    alert('Bitte geben Sie zuerst eine gültige Make.com Webhook URL ein.');
-                    return;
-                  }
-                  fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ event: 'COIN_COLLECTION_EXPORT', totalCoins: coins.length, coins })
-                  })
-                    .then(res => {
-                      if (res.ok) {
-                        setImportSuccessMsg(`Daten erfolgreich an Make.com Webhook übermittelt (${coins.length} Datensätze)!`);
-                      } else {
-                        alert(`Webhook-Antwort: Status ${res.status}`);
-                      }
-                    })
-                    .catch(err => {
-                      alert(`Fehler beim Senden an Make Webhook: ${err.message}`);
-                    });
-                }}
-                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-colors shrink-0"
-              >
-                An Make Senden
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {importErrors.length > 0 && (
         <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs space-y-2">
