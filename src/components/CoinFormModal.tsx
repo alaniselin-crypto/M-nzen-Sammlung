@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Upload, Sparkles, AlertCircle, Folder, Settings, Hash, Globe, Eye, Lock, Tag, ShoppingBag, ExternalLink, Banknote, Coins, Layers, Crown, Loader2, CheckCircle2 } from 'lucide-react';
 import { Coin, CoinCondition } from '../types';
-import { CoinAvatar } from './CoinAvatar';
+import { AutoCoinPreview } from './AutoCoinPreview';
 import { formatSKU } from '../utils/storage';
 import { WORLD_COUNTRIES, POPULAR_COIN_COUNTRIES } from '../data/countries';
 import { POPULAR_CURRENCIES } from '../data/currencies';
@@ -438,15 +438,13 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             {formData.imageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                 <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-full overflow-hidden border border-amber-400/20 bg-[#140f0d] flex items-center justify-center shrink-0">
-                  <CoinAvatar
+                  <AutoCoinPreview
                     imageUrl={formData.imageUrl}
                     name={formData.name || 'Vorderseite Vorschau'}
                     faceValue={formData.faceValue}
                     currency={formData.currency}
                     material={formData.material}
                     isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                    size="lg"
-                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-cover !object-center"
                   />
                 </div>
                 <div className="w-full min-w-0 text-center">
@@ -491,15 +489,13 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             {formData.reverseImageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                 <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-full overflow-hidden border border-amber-400/20 bg-[#140f0d] flex items-center justify-center shrink-0">
-                  <CoinAvatar
+                  <AutoCoinPreview
                     imageUrl={formData.reverseImageUrl}
                     name={formData.name || 'Rückseite Vorschau'}
                     faceValue={formData.faceValue}
                     currency={formData.currency}
                     material={formData.material}
                     isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                    size="lg"
-                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-cover !object-center"
                   />
                 </div>
                 <div className="w-full min-w-0 text-center">
