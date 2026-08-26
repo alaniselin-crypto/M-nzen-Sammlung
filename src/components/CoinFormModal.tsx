@@ -446,7 +446,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                     material={formData.material}
                     isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
                     size="lg"
-                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-contain !object-center"
+                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-cover !object-center"
                   />
                 </div>
                 <div className="w-full min-w-0 text-center">
@@ -499,7 +499,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                     material={formData.material}
                     isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
                     size="lg"
-                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-contain !object-center"
+                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-cover !object-center"
                   />
                 </div>
                 <div className="w-full min-w-0 text-center">
