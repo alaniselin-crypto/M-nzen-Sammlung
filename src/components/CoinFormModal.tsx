@@ -437,16 +437,18 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             </div>
             {formData.imageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                <CoinAvatar
-                  imageUrl={formData.imageUrl}
-                  name={formData.name || 'Vorderseite Vorschau'}
-                  faceValue={formData.faceValue}
-                  currency={formData.currency}
-                  material={formData.material}
-                  isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                  size="lg"
-                  className="!w-52 !h-52 sm:!w-64 sm:!h-64 !rounded-xl !border !border-amber-500/30 !shadow-none !object-contain !object-center bg-[#140f0d] shrink-0"
-                />
+                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-xl border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
+                  <CoinAvatar
+                    imageUrl={formData.imageUrl}
+                    name={formData.name || 'Vorderseite Vorschau'}
+                    faceValue={formData.faceValue}
+                    currency={formData.currency}
+                    material={formData.material}
+                    isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                    size="lg"
+                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-contain !object-center"
+                  />
+                </div>
                 <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
                   <p className="text-[11px] text-stone-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
@@ -488,16 +490,18 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
             </div>
             {formData.reverseImageUrl && (
               <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                <CoinAvatar
-                  imageUrl={formData.reverseImageUrl}
-                  name={formData.name || 'Rückseite Vorschau'}
-                  faceValue={formData.faceValue}
-                  currency={formData.currency}
-                  material={formData.material}
-                  isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                  size="lg"
-                  className="!w-52 !h-52 sm:!w-64 sm:!h-64 !rounded-xl !border !border-amber-500/30 !shadow-none !object-contain !object-center bg-[#140f0d] shrink-0"
-                />
+                <div className="w-52 h-52 sm:w-64 sm:h-64 rounded-xl border border-amber-500/30 bg-[#140f0d] flex items-center justify-center shrink-0">
+                  <CoinAvatar
+                    imageUrl={formData.reverseImageUrl}
+                    name={formData.name || 'Rückseite Vorschau'}
+                    faceValue={formData.faceValue}
+                    currency={formData.currency}
+                    material={formData.material}
+                    isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                    size="lg"
+                    className="!w-full !h-full !rounded-none !border-0 !shadow-none !object-contain !object-center"
+                  />
+                </div>
                 <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
                   <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
