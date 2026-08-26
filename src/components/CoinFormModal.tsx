@@ -436,7 +436,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </label>
             </div>
             {formData.imageUrl && (
-              <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
+              <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                 <CoinAvatar
                   imageUrl={formData.imageUrl}
                   name={formData.name || 'Vorderseite Vorschau'}
@@ -444,9 +444,10 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   currency={formData.currency}
                   material={formData.material}
                   isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                  size="md"
+                  size="lg"
+                  className="!object-contain !object-center"
                 />
-                <div className="flex-1 min-w-0">
+                <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
                   <p className="text-[11px] text-stone-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
                   <button
@@ -486,7 +487,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
               </label>
             </div>
             {formData.reverseImageUrl && (
-              <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
+              <div className="mt-3 flex flex-col items-center justify-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
                 <CoinAvatar
                   imageUrl={formData.reverseImageUrl}
                   name={formData.name || 'Rückseite Vorschau'}
@@ -494,9 +495,10 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                   currency={formData.currency}
                   material={formData.material}
                   isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                  size="md"
+                  size="lg"
+                  className="!object-contain !object-center"
                 />
-                <div className="flex-1 min-w-0">
+                <div className="w-full min-w-0 text-center">
                   <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
                   <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
                   <button
