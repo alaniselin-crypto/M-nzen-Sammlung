@@ -33,7 +33,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
   const currentDisplayImage = showReverse && coin.reverseImageUrl ? coin.reverseImageUrl : (coin.imageUrl || coin.reverseImageUrl);
   const hasBothImages = Boolean(coin.imageUrl && coin.reverseImageUrl && coin.imageUrl !== coin.reverseImageUrl);
   const rarityOpt = getRarityOption(coin.rarity);
-  const isBanknote = coin.itemType === 'banknote' || /banknote|schein|note|papier/i.test(coin.name + ' ' + (coin.material || '') + ' ' + (coin.notes || ''));
+  const isBanknote = coin.itemType === 'banknote' || (!coin.itemType && /\b(banknote|banknoten|geldschein|geldscheine|papiergeld)\b/i.test(coin.name + ' ' + (coin.material || '') + ' ' + (coin.notes || '')));
   const quantity = coin.quantity || 1;
 
   // Placeholder fallback styling based on material
@@ -74,7 +74,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="sm"
-                className="!object-contain !object-center"
+                className={isBanknote ? '!object-contain !object-center' : '!aspect-square !rounded-full !object-contain !object-center'}
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
@@ -230,7 +230,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="md"
-                className="!object-contain !object-center"
+                className={isBanknote ? '!object-contain !object-center' : '!aspect-square !rounded-full !object-contain !object-center'}
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
