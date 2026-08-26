@@ -11,19 +11,16 @@ interface AutoCoinPreviewProps {
   isBanknote?: boolean;
 }
 
-interface Bounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
+interface DetectedCircle {
   centerX: number;
   centerY: number;
+  diameter: number;
 }
 
 const ANALYSIS_SIZE = 256;
 const PREVIEW_SIZE = 512;
 
-const detectCoinBounds = (image: HTMLImageElement): Bounds | null => {
+const detectCoinCircle = (image: HTMLImageElement): DetectedCircle | null => {
   const scale = Math.min(1, ANALYSIS_SIZE / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -36,137 +33,106 @@ const detectCoinBounds = (image: HTMLImageElement): Bounds | null => {
 
   context.drawImage(image, 0, 0, width, height);
   const pixels = context.getImageData(0, 0, width, height).data;
-  const cornerDepth = Math.max(2, Math.round(Math.min(width, height) * 0.08));
-  const cornerPixels: number[] = [];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const inCorner =
-        (x < cornerDepth || x >= width - cornerDepth) &&
-        (y < cornerDepth || y >= height - cornerDepth);
-      if (inCorner) cornerPixels.push((y * width + x) * 4);
-    }
-  }
-
-  if (cornerPixels.length === 0) return null;
-
-  let red = 0;
-  let green = 0;
-  let blue = 0;
-  let alpha = 0;
-  for (const index of cornerPixels) {
-    red += pixels[index];
-    green += pixels[index + 1];
-    blue += pixels[index + 2];
-    alpha += pixels[index + 3];
-  }
-
-  const sampleCount = cornerPixels.length;
-  red /= sampleCount;
-  green /= sampleCount;
-  blue /= sampleCount;
-  alpha /= sampleCount;
-
-  let variance = 0;
-  for (const index of cornerPixels) {
-    variance +=
-      (pixels[index] - red) ** 2 +
-      (pixels[index + 1] - green) ** 2 +
-      (pixels[index + 2] - blue) ** 2;
-  }
-  variance /= sampleCount;
-
-  const colorThreshold = Math.min(85, Math.max(28, Math.sqrt(variance) * 2.2 + 18));
-  const thresholdSquared = colorThreshold ** 2;
-  const mask = new Uint8Array(width * height);
+  const grayscale = new Float32Array(width * height);
+  const gradientX = new Float32Array(width * height);
+  const gradientY = new Float32Array(width * height);
+  const gradientMagnitude = new Float32Array(width * height);
 
   for (let pixel = 0; pixel < width * height; pixel += 1) {
     const index = pixel * 4;
-    if (alpha < 32) {
-      mask[pixel] = pixels[index + 3] > 64 ? 1 : 0;
-      continue;
-    }
-
-    const distanceSquared =
-      (pixels[index] - red) ** 2 +
-      (pixels[index + 1] - green) ** 2 +
-      (pixels[index + 2] - blue) ** 2;
-    mask[pixel] = distanceSquared > thresholdSquared && pixels[index + 3] > 64 ? 1 : 0;
+    grayscale[pixel] = pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
   }
 
-  const visited = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let bestBounds: Bounds | null = null;
+  const magnitudes: number[] = [];
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const gx =
+        -grayscale[index - width - 1] + grayscale[index - width + 1] +
+        -2 * grayscale[index - 1] + 2 * grayscale[index + 1] +
+        -grayscale[index + width - 1] + grayscale[index + width + 1];
+      const gy =
+        -grayscale[index - width - 1] - 2 * grayscale[index - width] - grayscale[index - width + 1] +
+        grayscale[index + width - 1] + 2 * grayscale[index + width] + grayscale[index + width + 1];
+      const magnitude = Math.hypot(gx, gy);
+      gradientX[index] = gx;
+      gradientY[index] = gy;
+      gradientMagnitude[index] = magnitude;
+      if (magnitude > 0) magnitudes.push(magnitude);
+    }
+  }
+
+  if (magnitudes.length === 0) return null;
+  magnitudes.sort((a, b) => a - b);
+  const edgeThreshold = Math.max(20, magnitudes[Math.floor(magnitudes.length * 0.88)] || 0);
+  const minDimension = Math.min(width, height);
+  const minRadius = Math.max(8, Math.round(minDimension * 0.15));
+  const maxRadius = Math.max(minRadius, Math.round(minDimension * 0.49));
+
+  const scoreCircle = (centerX: number, centerY: number, radius: number, samples: number) => {
+    let score = 0;
+    let covered = 0;
+    let validSamples = 0;
+
+    for (let sample = 0; sample < samples; sample += 1) {
+      const angle = (sample / samples) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const x = Math.round(centerX + radius * cos);
+      const y = Math.round(centerY + radius * sin);
+      if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) continue;
+
+      validSamples += 1;
+      const index = y * width + x;
+      const magnitude = gradientMagnitude[index];
+      if (magnitude < edgeThreshold) continue;
+
+      const radialAlignment = Math.abs((gradientX[index] * cos + gradientY[index] * sin) / magnitude);
+      if (radialAlignment < 0.45) continue;
+      covered += 1;
+      score += Math.min(2, magnitude / edgeThreshold) * radialAlignment;
+    }
+
+    if (validSamples < samples * 0.9) return null;
+    const coverage = covered / validSamples;
+    if (coverage < 0.48) return null;
+    return (score / validSamples) * (0.85 + 0.15 * radius / maxRadius);
+  };
+
+  let bestCircle: DetectedCircle | null = null;
   let bestScore = 0;
+  const coarseStep = 4;
 
-  for (let start = 0; start < mask.length; start += 1) {
-    if (!mask[start] || visited[start]) continue;
-
-    let head = 0;
-    let tail = 1;
-    queue[0] = start;
-    visited[start] = 1;
-    let area = 0;
-    let minX = width;
-    let minY = height;
-    let maxX = 0;
-    let maxY = 0;
-    let sumX = 0;
-    let sumY = 0;
-
-    while (head < tail) {
-      const pixel = queue[head++];
-      const x = pixel % width;
-      const y = Math.floor(pixel / width);
-      area += 1;
-      sumX += x;
-      sumY += y;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-
-      const neighbors = [pixel - 1, pixel + 1, pixel - width, pixel + width];
-      for (const neighbor of neighbors) {
-        if (neighbor < 0 || neighbor >= mask.length || visited[neighbor] || !mask[neighbor]) continue;
-        const neighborX = neighbor % width;
-        if (Math.abs(neighborX - x) > 1) continue;
-        visited[neighbor] = 1;
-        queue[tail++] = neighbor;
+  for (let radius = minRadius; radius <= maxRadius; radius += 3) {
+    for (let centerY = radius; centerY < height - radius; centerY += coarseStep) {
+      for (let centerX = radius; centerX < width - radius; centerX += coarseStep) {
+        const score = scoreCircle(centerX, centerY, radius, 48);
+        if (score !== null && score > bestScore) {
+          bestScore = score;
+          bestCircle = { centerX, centerY, diameter: radius * 2 };
+        }
       }
     }
+  }
 
-    const boxWidth = maxX - minX + 1;
-    const boxHeight = maxY - minY + 1;
-    const areaRatio = area / (width * height);
-    const aspectRatio = boxWidth / boxHeight;
-    const fillRatio = area / (boxWidth * boxHeight);
-    if (
-      areaRatio < 0.03 ||
-      areaRatio > 0.85 ||
-      aspectRatio < 0.72 ||
-      aspectRatio > 1.38 ||
-      fillRatio < 0.35 ||
-      fillRatio > 0.95
-    ) {
-      continue;
-    }
+  if (!bestCircle || bestScore < 0.55) return null;
 
-    const centerX = sumX / area;
-    const centerY = sumY / area;
-    const centerDistance = Math.hypot(centerX - width / 2, centerY - height / 2);
-    const centerFactor = Math.max(0.35, 1 - centerDistance / Math.hypot(width / 2, height / 2));
-    const roundness = 1 - Math.min(1, Math.abs(1 - aspectRatio));
-    const fillFactor = 1 - Math.min(1, Math.abs(0.78 - fillRatio) / 0.78);
-    const score = area * roundness * fillFactor * centerFactor;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestBounds = { minX, minY, maxX, maxY, centerX, centerY };
+  const coarseRadius = bestCircle.diameter / 2;
+  let refinedCircle = bestCircle;
+  let refinedScore = bestScore;
+  for (let radius = Math.max(minRadius, coarseRadius - 3); radius <= Math.min(maxRadius, coarseRadius + 3); radius += 1) {
+    for (let centerY = bestCircle.centerY - 4; centerY <= bestCircle.centerY + 4; centerY += 1) {
+      for (let centerX = bestCircle.centerX - 4; centerX <= bestCircle.centerX + 4; centerX += 1) {
+        const score = scoreCircle(centerX, centerY, radius, 96);
+        if (score !== null && score > refinedScore) {
+          refinedScore = score;
+          refinedCircle = { centerX, centerY, diameter: radius * 2 };
+        }
+      }
     }
   }
 
-  return bestBounds;
+  return refinedCircle;
 };
 
 export const AutoCoinPreview: React.FC<AutoCoinPreviewProps> = ({
@@ -193,10 +159,10 @@ export const AutoCoinPreview: React.FC<AutoCoinPreviewProps> = ({
       if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
 
       try {
-        const bounds = detectCoinBounds(image);
+        const circle = detectCoinCircle(image);
         const canvas = canvasRef.current;
         const context = canvas?.getContext('2d');
-        if (!bounds || !canvas || !context) return;
+        if (!circle || !canvas || !context) return;
 
         canvas.width = PREVIEW_SIZE;
         canvas.height = PREVIEW_SIZE;
@@ -208,15 +174,10 @@ export const AutoCoinPreview: React.FC<AutoCoinPreviewProps> = ({
 
         const scaleX = image.naturalWidth / Math.max(1, Math.round(image.naturalWidth * Math.min(1, ANALYSIS_SIZE / Math.max(image.naturalWidth, image.naturalHeight))));
         const scaleY = image.naturalHeight / Math.max(1, Math.round(image.naturalHeight * Math.min(1, ANALYSIS_SIZE / Math.max(image.naturalWidth, image.naturalHeight))));
-        const minX = bounds.minX * scaleX;
-        const maxX = (bounds.maxX + 1) * scaleX;
-        const minY = bounds.minY * scaleY;
-        const maxY = (bounds.maxY + 1) * scaleY;
-        const detectedWidth = maxX - minX;
-        const detectedHeight = maxY - minY;
-        const drawScale = (PREVIEW_SIZE * 0.9) / Math.max(detectedWidth, detectedHeight);
-        const centerX = bounds.centerX * scaleX;
-        const centerY = bounds.centerY * scaleY;
+        const detectedDiameter = circle.diameter * ((scaleX + scaleY) / 2);
+        const drawScale = (PREVIEW_SIZE * 0.9) / detectedDiameter;
+        const centerX = circle.centerX * scaleX;
+        const centerY = circle.centerY * scaleY;
 
         context.drawImage(
           image,
