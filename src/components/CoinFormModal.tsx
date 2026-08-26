@@ -376,6 +376,106 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
 
         {/* Content Form */}
         <form onSubmit={handleSubmit} className="p-3 sm:p-6 space-y-5 sm:space-y-6 max-w-full overflow-x-hidden">
+          {/* Vorderseite (Avers) */}
+          <div className="sm:col-span-2 p-4 bg-slate-900/80 rounded-2xl border border-slate-800">
+            <label className="block text-xs font-semibold text-amber-300 mb-2">
+              1. Vorderseite (Avers) - Bild-URL oder Datei
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                value={formData.imageUrl}
+                onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
+                placeholder="https://beispiel.de/muenze_vorderseite.jpg oder Bild hochladen"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              />
+              <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200 transition-colors shrink-0">
+                <Upload className="w-4 h-4 text-amber-400" />
+                <span>{uploadingField === 'imageUrl' ? 'Komprimiere...' : 'Avers hochladen'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handleImageUpload(e, 'imageUrl')}
+                  className="hidden"
+                />
+              </label>
+            </div>
+            {formData.imageUrl && (
+              <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
+                <CoinAvatar
+                  imageUrl={formData.imageUrl}
+                  name={formData.name || 'Vorderseite Vorschau'}
+                  faceValue={formData.faceValue}
+                  currency={formData.currency}
+                  material={formData.material}
+                  isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                  size="md"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
+                  <p className="text-[11px] text-stone-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, imageUrl: '' })}
+                    className="mt-2 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/40 border border-rose-800/40 rounded-lg transition-colors"
+                  >
+                    Bild entfernen
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rückseite (Revers) */}
+          <div className="sm:col-span-2 p-4 bg-[#1a1412]/80 rounded-2xl border border-[#3e2e26]">
+            <label className="block text-xs font-semibold text-amber-300 mb-2">
+              2. Rückseite (Revers) - Bild-URL oder Datei
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                value={formData.reverseImageUrl}
+                onChange={e => setFormData({ ...formData, reverseImageUrl: e.target.value })}
+                placeholder="https://beispiel.de/muenze_rueckseite.jpg oder Bild hochladen"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#140f0d] border border-[#3e2e26] text-sm text-stone-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              />
+              <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#2b211a] hover:bg-[#3d2e26] border border-[#3e2e26] rounded-xl text-xs font-medium text-stone-200 transition-colors shrink-0">
+                <Upload className="w-4 h-4 text-amber-400" />
+                <span>{uploadingField === 'reverseImageUrl' ? 'Komprimiere...' : 'Revers hochladen'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handleImageUpload(e, 'reverseImageUrl')}
+                  className="hidden"
+                />
+              </label>
+            </div>
+            {formData.reverseImageUrl && (
+              <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
+                <CoinAvatar
+                  imageUrl={formData.reverseImageUrl}
+                  name={formData.name || 'Rückseite Vorschau'}
+                  faceValue={formData.faceValue}
+                  currency={formData.currency}
+                  material={formData.material}
+                  isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
+                  size="md"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, reverseImageUrl: '' })}
+                    className="mt-2 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/40 border border-rose-800/40 rounded-lg transition-colors"
+                  >
+                    Bild entfernen
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Validation Error Alert Banner */}
           {Object.keys(errors).length > 0 && (
             <div className="p-3.5 sm:p-4 rounded-xl bg-rose-500/15 border-2 border-rose-500/60 text-rose-200 text-xs font-semibold flex items-start gap-3 shadow-lg animate-in fade-in">
@@ -1084,106 +1184,6 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                     <option value={formData.material}>{formData.material}</option>
                   )}
                 </select>
-              </div>
-
-              {/* Vorderseite (Avers) */}
-              <div className="sm:col-span-2 p-4 bg-slate-900/80 rounded-2xl border border-slate-800">
-                <label className="block text-xs font-semibold text-amber-300 mb-2">
-                  1. Vorderseite (Avers) - Bild-URL oder Datei
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    type="text"
-                    value={formData.imageUrl}
-                    onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
-                    placeholder="https://beispiel.de/muenze_vorderseite.jpg oder Bild hochladen"
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                  />
-                  <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200 transition-colors shrink-0">
-                    <Upload className="w-4 h-4 text-amber-400" />
-                    <span>{uploadingField === 'imageUrl' ? 'Komprimiere...' : 'Avers hochladen'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => handleImageUpload(e, 'imageUrl')}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                {formData.imageUrl && (
-                  <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                    <CoinAvatar
-                      imageUrl={formData.imageUrl}
-                      name={formData.name || 'Vorderseite Vorschau'}
-                      faceValue={formData.faceValue}
-                      currency={formData.currency}
-                      material={formData.material}
-                      isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-amber-300">Vorderseite (Avers)</p>
-                      <p className="text-[11px] text-stone-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, imageUrl: '' })}
-                        className="mt-2 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/40 border border-rose-800/40 rounded-lg transition-colors"
-                      >
-                        Bild entfernen
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Rückseite (Revers) */}
-              <div className="sm:col-span-2 p-4 bg-[#1a1412]/80 rounded-2xl border border-[#3e2e26]">
-                <label className="block text-xs font-semibold text-amber-300 mb-2">
-                  2. Rückseite (Revers) - Bild-URL oder Datei
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    type="text"
-                    value={formData.reverseImageUrl}
-                    onChange={e => setFormData({ ...formData, reverseImageUrl: e.target.value })}
-                    placeholder="https://beispiel.de/muenze_rueckseite.jpg oder Bild hochladen"
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#140f0d] border border-[#3e2e26] text-sm text-stone-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                  />
-                  <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#2b211a] hover:bg-[#3d2e26] border border-[#3e2e26] rounded-xl text-xs font-medium text-stone-200 transition-colors shrink-0">
-                    <Upload className="w-4 h-4 text-amber-400" />
-                    <span>{uploadingField === 'reverseImageUrl' ? 'Komprimiere...' : 'Revers hochladen'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => handleImageUpload(e, 'reverseImageUrl')}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                {formData.reverseImageUrl && (
-                  <div className="mt-3 flex items-center gap-4 p-3 bg-[#17110e] rounded-xl border border-amber-500/30">
-                    <CoinAvatar
-                      imageUrl={formData.reverseImageUrl}
-                      name={formData.name || 'Rückseite Vorschau'}
-                      faceValue={formData.faceValue}
-                      currency={formData.currency}
-                      material={formData.material}
-                      isBanknote={formData.itemType === 'banknote' || /banknote|schein|note|papier/i.test(formData.name + ' ' + (formData.material || '') + ' ' + (formData.notes || ''))}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-amber-300">Rückseite (Revers)</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">Bild bereit & gespeichert</p>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, reverseImageUrl: '' })}
-                        className="mt-2 px-2.5 py-1 text-xs text-rose-400 hover:bg-rose-950/40 border border-rose-800/40 rounded-lg transition-colors"
-                      >
-                        Bild entfernen
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="sm:col-span-2">
