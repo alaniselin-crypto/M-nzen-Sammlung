@@ -2,5 +2,5 @@
   "name": "inumis.app",
   "description": "inumis.app - Digitale Münzsammlung, Wertanalyse & KI-Numismatik.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_OPENAI_API"]
 }

@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -15,7 +15,7 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
   app.use(express.text({ limit: "15mb", type: "*/*" }));
 
-  // Helper to convert base64 data URIs or http(s) image URLs into Gemini inlineData format
+  // Helper to convert base64 data URIs or http(s) image URLs for OpenAI image input
   async function fetchImagePart(urlOrBase64?: string): Promise<{ mimeType: string; data: string } | null> {
     if (!urlOrBase64 || typeof urlOrBase64 !== "string") return null;
     const trimmed = urlOrBase64.trim();
@@ -34,7 +34,7 @@ async function startServer() {
         const resp = await fetch(directUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
         if (resp.ok) {
           const contentType = (resp.headers.get("content-type") || "").toLowerCase();
-          // Strictly avoid HTML / JSON error pages being sent as JPEG to Gemini
+          // Strictly avoid HTML / JSON error pages being sent as JPEG to OpenAI
           if (contentType.includes("html") || contentType.includes("json")) {
             return null;
           }
@@ -52,7 +52,7 @@ async function startServer() {
           };
         }
       } catch (err) {
-        console.error("Failed to fetch image URL for Gemini:", trimmed, err);
+        console.error("Failed to fetch image URL for OpenAI:", trimmed, err);
       }
     }
 
@@ -62,21 +62,14 @@ async function startServer() {
   // API Endpoint: AI Coin Title & Description Generation
   app.post("/api/generate-coin-info", async (req, res) => {
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
         return res.status(400).json({
-          error: "GEMINI_API_KEY ist nicht in den Umgebungsvariablen / Secrets konfiguriert."
+          error: "OPENAI_API_KEY ist nicht in den Umgebungsvariablen / Secrets konfiguriert."
         });
       }
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
-      });
+      const openai = new OpenAI({ apiKey });
 
       const {
         country,
@@ -92,14 +85,15 @@ async function startServer() {
         reverseImageUrl,
       } = req.body;
 
-      const promptParts: any[] = [];
+      const messageContent: any[] = [];
       let imageContextNotice = "";
 
       // Fetch Vorderseite (Avers) image
       const frontPart = await fetchImagePart(imageUrl);
       if (frontPart) {
-        promptParts.push({
-          inlineData: frontPart,
+        messageContent.push({
+          type: "image_url",
+          image_url: { url: `data:${frontPart.mimeType};base64,${frontPart.data}` },
         });
         imageContextNotice += "\n- Bild 1: Vorderseite (Avers) der Münze/Banknote ist beigefügt.";
       }
@@ -107,8 +101,9 @@ async function startServer() {
       // Fetch Rückseite (Revers) image
       const backPart = await fetchImagePart(reverseImageUrl);
       if (backPart) {
-        promptParts.push({
-          inlineData: backPart,
+        messageContent.push({
+          type: "image_url",
+          image_url: { url: `data:${backPart.mimeType};base64,${backPart.data}` },
         });
         imageContextNotice += "\n- Bild 2: Rückseite (Revers) der Münze/Banknote ist ebenfalls beigefügt.";
       }
@@ -138,33 +133,31 @@ Erstelle deine Antwort im folgenden JSON-Format:
   "description": "Präzise, strukturierte numismatische Beschreibung basierend auf den sichtbaren Avers- und Revers-Details, Inschriften, Wappen und historische Einordnung auf Deutsch."
 }`;
 
-      promptParts.push({ text: contextText });
+      messageContent.unshift({ type: "text", text: contextText });
 
       let responseText = "";
       try {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: { parts: promptParts },
-          config: {
-            responseMimeType: "application/json",
-          },
+        const response = await openai.chat.completions.create({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: messageContent }],
+          response_format: { type: "json_object" },
+          max_tokens: 1000,
         });
-        responseText = response.text || "";
+        responseText = response.choices[0]?.message?.content || "";
       } catch (imageErr: any) {
-        console.warn("Gemini build with images failed, falling back to text prompt:", imageErr?.message);
-        // Fallback: If image inlineData failed (e.g. invalid image format), retry text-only prompt!
-        const textOnlyResponse = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: contextText,
-          config: {
-            responseMimeType: "application/json",
-          },
+        console.warn("OpenAI request with images failed, falling back to text prompt:", imageErr?.message);
+        // Fallback: If image input failed (e.g. invalid image format), retry text-only prompt.
+        const textOnlyResponse = await openai.chat.completions.create({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: contextText }],
+          response_format: { type: "json_object" },
+          max_tokens: 1000,
         });
-        responseText = textOnlyResponse.text || "";
+        responseText = textOnlyResponse.choices[0]?.message?.content || "";
       }
 
       if (!responseText) {
-        return res.status(500).json({ error: "Keine Antwort von Gemini AI erhalten." });
+        return res.status(500).json({ error: "Keine Antwort von OpenAI erhalten." });
       }
 
       try {
