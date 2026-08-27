@@ -193,12 +193,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         onClose();
       }, 1200);
     } catch (err: any) {
-      console.error('Google Auth Error:', err);
-      if (err?.message?.includes('deleted_client') || err?.code === 'auth/invalid-credential' || err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/popup-blocked') {
-        setErrorMsg('Google-Login ist auf Mobilgeräten nicht aktiv. Bitte nutzen Sie einfach die kostenlose E-Mail & Passwort Registrierung/Anmeldung oben!');
-      } else {
-        setErrorMsg('Google-Anmeldung fehlgeschlagen. Bitte nutzen Sie E-Mail & Passwort.');
-      }
+      const errorCode = typeof err?.code === 'string' ? err.code : 'unknown';
+      const errorMessage = typeof err?.message === 'string' ? err.message : 'Unbekannter Fehler';
+      console.error('Google Auth Error:', errorCode, errorMessage);
+      setErrorMsg(`Google-Anmeldung fehlgeschlagen (${errorCode}): ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -221,7 +219,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-[#181a22] border border-amber-500/30 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col text-slate-100">
+      <div className="bg-[#181a22] border border-amber-500/30 rounded-2xl w-full max-w-md max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] shadow-2xl overflow-hidden flex flex-col text-slate-100">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#121318]">
@@ -247,7 +245,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
 
           {/* User Already Logged In */}
           {user ? (
@@ -294,6 +292,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ) : (
             /* Login / Register Form */
             <div className="space-y-4">
+
+              {/* Google Sign In */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 text-xs font-semibold flex items-center justify-center space-x-2 transition-colors cursor-pointer"
+              >
+                <Globe className="w-4 h-4 text-blue-400" />
+                <span>Mit Google-Konto anmelden</span>
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-800"></div>
+                <span className="flex-shrink mx-3 text-[10px] uppercase font-semibold text-slate-500">
+                  Oder
+                </span>
+                <div className="flex-grow border-t border-slate-800"></div>
+              </div>
 
               {/* Mode Toggle Tabs */}
               <div className="flex rounded-xl bg-slate-900 p-1 border border-slate-800">
@@ -473,25 +490,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   )}
                 </button>
               </form>
-
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-800"></div>
-                <span className="flex-shrink mx-3 text-[10px] uppercase font-semibold text-slate-500">
-                  Oder
-                </span>
-                <div className="flex-grow border-t border-slate-800"></div>
-              </div>
-
-              {/* Google Sign In */}
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={isLoading}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 text-xs font-semibold flex items-center justify-center space-x-2 transition-colors cursor-pointer"
-              >
-                <Globe className="w-4 h-4 text-blue-400" />
-                <span>Mit Google-Konto anmelden</span>
-              </button>
 
             </div>
           )}

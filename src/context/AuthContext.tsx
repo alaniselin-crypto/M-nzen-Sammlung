@@ -4,9 +4,13 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithCredential,
   signInWithPopup, 
   signOut 
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, googleProvider } from '../lib/firebase';
 
 export interface AppUser {
@@ -63,10 +67,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginWithGoogle = async () => {
+    if (Capacitor.isNativePlatform()) {
+      const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+      const idToken = result.credential?.idToken ?? null;
+      const accessToken = result.credential?.accessToken ?? null;
+      if (!idToken) {
+        throw new Error('Native Google Sign-In returned no ID token.');
+      }
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      await signInWithCredential(auth, credential);
+      return;
+    }
     await signInWithPopup(auth, googleProvider);
   };
 
   const logout = async () => {
+    if (Capacitor.isNativePlatform()) {
+      await FirebaseAuthentication.signOut();
+    }
     await signOut(auth);
   };
 

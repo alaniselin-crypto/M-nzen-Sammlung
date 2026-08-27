@@ -44,15 +44,15 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 bg-[#16100e] border-b border-amber-900/40 px-3 py-2.5 sm:px-6 max-w-full shadow-md">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+    <header className="sticky top-0 z-30 bg-[#16100e] border-b border-amber-900/40 px-1.5 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.625rem)] sm:px-6 max-w-full shadow-md">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-1 sm:gap-4">
         {/* Brand */}
         <div 
           onClick={onOpenLogoModal}
-          className="flex items-center gap-2 sm:gap-3 shrink-0 cursor-pointer group"
+          className="flex items-center gap-1.5 sm:gap-3 shrink-0 cursor-pointer group"
           title="inumis.app Logo anzeigen & herunterladen"
         >
-          <div className="relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 via-amber-600 to-amber-800 p-0.5 shadow-lg shadow-amber-950/40 group-hover:scale-105 transition-transform">
+          <div className="relative flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 via-amber-600 to-amber-800 p-0.5 shadow-lg shadow-amber-950/40 group-hover:scale-105 transition-transform">
             <div className="w-full h-full bg-[#241c18] rounded-[10px] flex items-center justify-center">
               <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
             </div>
@@ -60,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-base sm:text-lg font-bold text-stone-100 tracking-tight font-serif group-hover:text-amber-400 transition-colors">
+              <h1 className="text-sm sm:text-lg font-bold text-stone-100 tracking-tight font-serif group-hover:text-amber-400 transition-colors">
                 inumis.app
               </h1>
               <span className="hidden sm:inline-block text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -91,11 +91,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Controls: Login & Zahnrad Settings Menu */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {onOpenAuthModal && (
             <button
               onClick={onOpenAuthModal}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-all shadow-sm shrink-0 border ${
+              className={`flex items-center gap-1 px-2 py-1.5 text-[10px] sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs font-semibold rounded-lg transition-all shadow-sm shrink-0 border ${
                 user
                   ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:border-emerald-500/50'
                   : 'bg-amber-500 hover:bg-amber-400 text-stone-950 border-amber-400 font-bold shadow-amber-950/40'
@@ -111,8 +111,9 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
               ) : (
                 <>
-                  <LogIn className="w-4 h-4 shrink-0 text-stone-950" />
-                  <span>Anmelden / Registrieren</span>
+                  <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-stone-950" />
+                  <span className="sm:hidden">Anmelden</span>
+                  <span className="hidden sm:inline">Anmelden / Registrieren</span>
                 </>
               )}
             </button>
@@ -121,12 +122,12 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/50 rounded-lg transition-all shadow-sm shrink-0"
+              className="flex items-center gap-1 px-2 py-1.5 text-[10px] sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/50 rounded-lg transition-all shadow-sm shrink-0"
               title="Einstellungen & Werkzeuge öffnen"
             >
               <Settings className={`w-4 h-4 text-amber-400 shrink-0 transition-transform duration-300 ${isSettingsOpen ? 'rotate-90' : ''}`} />
               <span className="font-medium text-amber-300">Einstellungen</span>
-              <ChevronDown className={`w-3.5 h-3.5 text-amber-400/80 transition-transform ${isSettingsOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`hidden sm:block w-3.5 h-3.5 text-amber-400/80 transition-transform ${isSettingsOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Dropdown Menu */}
