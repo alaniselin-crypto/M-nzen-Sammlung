@@ -1,19 +1,21 @@
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  where,
+import {
+  collection,
+  doc,
+  getDoc,
   getDocs,
-  writeBatch
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Coin } from '../types';
 
+const USERS_COLLECTION = 'users';
 const COINS_COLLECTION = 'coins';
-const SETTINGS_COLLECTION = 'userSettings';
+const TOMBSTONES_COLLECTION = 'coinTombstones';
+const SETTINGS_COLLECTION = 'settings';
+const SETTINGS_DOCUMENT = 'app';
 
 export enum OperationType {
   CREATE = 'create',
@@ -34,14 +36,34 @@ export interface FirestoreErrorInfo {
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
     tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
+    providerInfo?: { providerId?: string | null; email?: string | null }[];
   };
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export interface CoinTombstone {
+  coinId: string;
+  deletedAt: unknown;
+}
+
+export interface CoinSyncSnapshot {
+  coins: Coin[];
+  tombstones: CoinTombstone[];
+}
+
+export interface UserAppSettings {
+  folders?: string[];
+  platforms?: string[];
+}
+
+export interface SyncResult {
+  created: number;
+  updated: number;
+  unchanged: number;
+  skippedByTombstone: number;
+  settingsUpdated: boolean;
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -53,50 +75,128 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       providerInfo: auth.currentUser?.providerData?.map(provider => ({
         providerId: provider.providerId,
         email: provider.email,
-      })) || []
+      })) || [],
     },
     operationType,
-    path
+    path,
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
-export function subscribeToUserCoins(userId: string, callback: (coins: Coin[]) => void) {
-  const q = query(
-    collection(db, COINS_COLLECTION),
-    where('userId', '==', userId)
-  );
+function requireUid(uid: string): string {
+  if (typeof uid !== 'string' || uid.length === 0) {
+    throw new Error('A Firebase UID is required for Firestore access.');
+  }
+  return uid;
+}
 
-  return onSnapshot(q, (snapshot) => {
-    const coins: Coin[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      coins.push({
-        ...data,
-        id: docSnap.id
-      } as Coin);
-    });
+function userPath(uid: string): string {
+  return `${USERS_COLLECTION}/${requireUid(uid)}`;
+}
 
-    // Sort by catalogNumber
-    coins.sort((a, b) => {
-      const catA = parseInt(a.catalogNumber || '0', 10);
-      const catB = parseInt(b.catalogNumber || '0', 10);
-      return catA - catB;
-    });
+function userCoinsCollection(uid: string) {
+  return collection(db, USERS_COLLECTION, requireUid(uid), COINS_COLLECTION);
+}
 
-    callback(coins);
-  }, (error) => {
-    console.warn('Firestore coins subscription warning/error:', error);
+function userCoinDocument(uid: string, coinId: string) {
+  return doc(db, USERS_COLLECTION, requireUid(uid), COINS_COLLECTION, coinId);
+}
+
+function userTombstonesCollection(uid: string) {
+  return collection(db, USERS_COLLECTION, requireUid(uid), TOMBSTONES_COLLECTION);
+}
+
+function userTombstoneDocument(uid: string, coinId: string) {
+  return doc(db, USERS_COLLECTION, requireUid(uid), TOMBSTONES_COLLECTION, coinId);
+}
+
+function userSettingsDocument(uid: string) {
+  return doc(db, USERS_COLLECTION, requireUid(uid), SETTINGS_COLLECTION, SETTINGS_DOCUMENT);
+}
+
+function sortCoins(coins: Coin[]): Coin[] {
+  return coins.sort((a, b) => {
+    const catA = parseInt(a.catalogNumber || '0', 10);
+    const catB = parseInt(b.catalogNumber || '0', 10);
+    return catA - catB;
   });
+}
+
+function cleanCoinData(coin: Coin): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  Object.entries(coin).forEach(([key, value]) => {
+    if (key !== 'userId' && value !== undefined) data[key] = value;
+  });
+  return data;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((result, key) => {
+        const child = (value as Record<string, unknown>)[key];
+        if (child !== undefined && key !== 'userId') result[key] = canonicalize(child);
+        return result;
+      }, {});
+  }
+  return value;
+}
+
+export function coinsDifferForSync(localCoin: Coin, cloudCoin: Coin): boolean {
+  return JSON.stringify(canonicalize(localCoin)) !== JSON.stringify(canonicalize(cloudCoin));
+}
+
+function arraysEqual(left: string[] = [], right: string[] = []): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export async function fetchUserCoinSyncSnapshot(uid: string): Promise<CoinSyncSnapshot> {
+  const validUid = requireUid(uid);
+  try {
+    const [coinSnapshot, tombstoneSnapshot] = await Promise.all([
+      getDocs(userCoinsCollection(validUid)),
+      getDocs(userTombstonesCollection(validUid)),
+    ]);
+    const tombstones = tombstoneSnapshot.docs.map(document => {
+      const data = document.data();
+      return {
+        coinId: typeof data.coinId === 'string' ? data.coinId : document.id,
+        deletedAt: data.deletedAt ?? null,
+      };
+    });
+    const tombstoneIds = new Set(tombstones.map(tombstone => tombstone.coinId));
+    const coins = coinSnapshot.docs
+      .filter(document => !tombstoneIds.has(document.id))
+      .map(document => ({ ...document.data(), id: document.id } as Coin));
+    return { coins: sortCoins(coins), tombstones };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, `${userPath(validUid)}/${COINS_COLLECTION}`);
+  }
+}
+
+export async function fetchUserSettings(uid: string): Promise<UserAppSettings> {
+  const validUid = requireUid(uid);
+  try {
+    const snapshot = await getDoc(userSettingsDocument(validUid));
+    if (!snapshot.exists()) return {};
+    const data = snapshot.data();
+    return {
+      folders: Array.isArray(data.folders) ? data.folders.filter((value): value is string => typeof value === 'string') : undefined,
+      platforms: Array.isArray(data.platforms) ? data.platforms.filter((value): value is string => typeof value === 'string') : undefined,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${userPath(validUid)}/${SETTINGS_COLLECTION}/${SETTINGS_DOCUMENT}`);
+  }
 }
 
 export async function compressDataUrlIfNeeded(dataUrl: string, maxDim = 800, quality = 0.75): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith('data:image/')) return dataUrl;
-  // If string length is under 300KB, it's already sufficiently small
   if (dataUrl.length < 300 * 1024) return dataUrl;
 
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -123,10 +223,9 @@ export async function compressDataUrlIfNeeded(dataUrl: string, maxDim = 800, qua
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        const compressed = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressed);
-      } catch (err) {
-        console.warn('Canvas compression failed:', err);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch (error) {
+        console.warn('Canvas compression failed:', error);
         resolve(dataUrl);
       }
     };
@@ -135,131 +234,125 @@ export async function compressDataUrlIfNeeded(dataUrl: string, maxDim = 800, qua
   });
 }
 
-export async function saveCoinToFirestore(userId: string, coin: Coin): Promise<void> {
+export async function saveCoinToFirestore(uid: string, coin: Coin): Promise<void> {
+  const validUid = requireUid(uid);
+  const coinPath = `${userPath(validUid)}/${COINS_COLLECTION}/${coin.id}`;
   try {
-    const compressedImageUrl = coin.imageUrl ? await compressDataUrlIfNeeded(coin.imageUrl, 800, 0.75) : '';
-    const compressedReverseImageUrl = coin.reverseImageUrl ? await compressDataUrlIfNeeded(coin.reverseImageUrl, 800, 0.75) : '';
-
-    const cleanCoinData: Record<string, any> = {};
-    Object.entries(coin).forEach(([key, value]) => {
-      if (value !== undefined) {
-        cleanCoinData[key] = value;
-      }
-    });
-
-    const coinRef = doc(db, COINS_COLLECTION, coin.id);
+    const [imageUrl, reverseImageUrl] = await Promise.all([
+      coin.imageUrl ? compressDataUrlIfNeeded(coin.imageUrl, 800, 0.75) : Promise.resolve(''),
+      coin.reverseImageUrl ? compressDataUrlIfNeeded(coin.reverseImageUrl, 800, 0.75) : Promise.resolve(''),
+    ]);
     const coinData = {
-      ...cleanCoinData,
-      imageUrl: compressedImageUrl,
-      reverseImageUrl: compressedReverseImageUrl,
-      userId,
-      updatedAt: new Date().toISOString()
+      ...cleanCoinData(coin),
+      imageUrl,
+      reverseImageUrl,
+      updatedAt: coin.updatedAt || new Date().toISOString(),
     };
-    await setDoc(coinRef, coinData, { merge: true });
+    await runTransaction(db, async transaction => {
+      const tombstone = await transaction.get(userTombstoneDocument(validUid, coin.id));
+      if (tombstone.exists()) throw new Error(`Coin ${coin.id} is protected by a deletion tombstone.`);
+      transaction.set(userCoinDocument(validUid, coin.id), coinData, { merge: true });
+    });
   } catch (error) {
-    console.error('saveCoinToFirestore error:', error);
-    handleFirestoreError(error, OperationType.WRITE, `${COINS_COLLECTION}/${coin.id}`);
+    handleFirestoreError(error, OperationType.WRITE, coinPath);
   }
 }
 
-export async function deleteCoinFromFirestore(userId: string, coinId: string): Promise<void> {
+export async function deleteCoinFromFirestore(uid: string, coinId: string): Promise<void> {
+  const validUid = requireUid(uid);
+  const coinPath = `${userPath(validUid)}/${COINS_COLLECTION}/${coinId}`;
   try {
-    const coinRef = doc(db, COINS_COLLECTION, coinId);
-    await deleteDoc(coinRef);
+    const batch = writeBatch(db);
+    batch.set(userTombstoneDocument(validUid, coinId), { coinId, deletedAt: serverTimestamp() });
+    batch.delete(userCoinDocument(validUid, coinId));
+    await batch.commit();
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${COINS_COLLECTION}/${coinId}`);
+    handleFirestoreError(error, OperationType.DELETE, coinPath);
   }
 }
 
-export async function clearAllCoinsFromFirestore(userId: string): Promise<void> {
+export async function clearAllCoinsFromFirestore(uid: string): Promise<void> {
+  const validUid = requireUid(uid);
   try {
-    const q = query(
-      collection(db, COINS_COLLECTION),
-      where('userId', '==', userId)
-    );
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return;
-
-    const docs = snapshot.docs;
-    for (let i = 0; i < docs.length; i += 450) {
+    const snapshot = await getDocs(userCoinsCollection(validUid));
+    for (let index = 0; index < snapshot.docs.length; index += 225) {
       const batch = writeBatch(db);
-      const chunk = docs.slice(i, i + 450);
-      chunk.forEach(docSnap => batch.delete(docSnap.ref));
+      snapshot.docs.slice(index, index + 225).forEach(document => {
+        batch.set(userTombstoneDocument(validUid, document.id), { coinId: document.id, deletedAt: serverTimestamp() });
+        batch.delete(document.ref);
+      });
       await batch.commit();
     }
   } catch (error) {
-    console.error('clearAllCoinsFromFirestore error:', error);
-    handleFirestoreError(error, OperationType.DELETE, COINS_COLLECTION);
+    handleFirestoreError(error, OperationType.DELETE, `${userPath(validUid)}/${COINS_COLLECTION}`);
   }
 }
 
-export function subscribeToUserSettings(
-  userId: string, 
-  callback: (settings: { folders?: string[]; platforms?: string[] }) => void
-) {
-  const docRef = doc(db, SETTINGS_COLLECTION, userId);
-
-  return onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      callback(docSnap.data() as { folders?: string[]; platforms?: string[] });
-    } else {
-      callback({});
-    }
-  }, (error) => {
-    console.warn('Firestore userSettings subscription warning/error:', error);
-  });
-}
-
-export async function saveUserSettingsToFirestore(
-  userId: string, 
-  settings: { folders?: string[]; platforms?: string[] }
-): Promise<void> {
+export async function saveUserSettingsToFirestore(uid: string, settings: UserAppSettings): Promise<void> {
+  const validUid = requireUid(uid);
+  const safeSettings: UserAppSettings = {};
+  if (Array.isArray(settings.folders)) safeSettings.folders = settings.folders.filter(value => typeof value === 'string');
+  if (Array.isArray(settings.platforms)) safeSettings.platforms = settings.platforms.filter(value => typeof value === 'string');
   try {
-    const docRef = doc(db, SETTINGS_COLLECTION, userId);
-    await setDoc(docRef, {
-      userId,
-      ...settings,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+    await setDoc(userSettingsDocument(validUid), safeSettings, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${SETTINGS_COLLECTION}/${userId}`);
+    handleFirestoreError(error, OperationType.WRITE, `${userPath(validUid)}/${SETTINGS_COLLECTION}/${SETTINGS_DOCUMENT}`);
   }
 }
 
 export async function syncLocalDataToFirestore(
-  userId: string,
+  uid: string,
   localCoins: Coin[],
   localFolders: string[],
   localPlatforms: string[]
-): Promise<void> {
-  try {
-    // Check existing coins in Firestore
-    const q = query(
-      collection(db, COINS_COLLECTION),
-      where('userId', '==', userId)
-    );
-    const snapshot = await getDocs(q);
-    const existingIds = new Set(snapshot.docs.map(docSnap => docSnap.id));
+): Promise<SyncResult> {
+  const validUid = requireUid(uid);
+  const [snapshot, cloudSettings] = await Promise.all([
+    fetchUserCoinSyncSnapshot(validUid),
+    fetchUserSettings(validUid),
+  ]);
+  const cloudById = new Map(snapshot.coins.map(coin => [coin.id, coin]));
+  const tombstoneIds = new Set(snapshot.tombstones.map(tombstone => tombstone.coinId));
+  const result: SyncResult = { created: 0, updated: 0, unchanged: 0, skippedByTombstone: 0, settingsUpdated: false };
 
-    // Upload any real local coins missing from Firestore (ignore default sample coins coin-1..6)
-    if (localCoins.length > 0) {
-      for (const coin of localCoins) {
-        const isDefaultSample = coin.id.startsWith('coin-') && /^coin-[1-6]$/.test(coin.id);
-        // Only upload if it's not an un-edited default sample coin, or if the user added it as a real custom coin
-        if (!existingIds.has(coin.id) && !isDefaultSample) {
-          await saveCoinToFirestore(userId, coin);
-        }
-      }
+  for (const coin of localCoins) {
+    if (/^coin-[1-6]$/.test(coin.id)) continue;
+    if (tombstoneIds.has(coin.id)) {
+      result.skippedByTombstone++;
+      continue;
     }
-
-    // Sync folders and platforms
-    if (localFolders.length > 0 || localPlatforms.length > 0) {
-      await saveUserSettingsToFirestore(userId, {
-        folders: localFolders,
-        platforms: localPlatforms
-      });
+    const cloudCoin = cloudById.get(coin.id);
+    if (!cloudCoin) {
+      await saveCoinToFirestore(validUid, coin);
+      result.created++;
+    } else if (coinsDifferForSync(coin, cloudCoin)) {
+      await saveCoinToFirestore(validUid, coin);
+      result.updated++;
+    } else {
+      result.unchanged++;
     }
-  } catch (error) {
-    console.error('Error syncing local data to Firestore:', error);
   }
+
+  if (!arraysEqual(localFolders, cloudSettings.folders) || !arraysEqual(localPlatforms, cloudSettings.platforms)) {
+    await saveUserSettingsToFirestore(validUid, { folders: localFolders, platforms: localPlatforms });
+    result.settingsUpdated = true;
+  }
+  return result;
+}
+
+// Transitional one-shot wrappers keep App.tsx compilable until Phase 3C.
+export function subscribeToUserCoins(uid: string, callback: (coins: Coin[]) => void): () => void {
+  let active = true;
+  void fetchUserCoinSyncSnapshot(uid).then(snapshot => {
+    if (active) callback(snapshot.coins);
+  }).catch(error => console.warn('Firestore one-time coin load warning/error:', error));
+  return () => { active = false; };
+}
+
+export function subscribeToUserSettings(uid: string, callback: (settings: UserAppSettings) => void): () => void {
+  let active = true;
+  void fetchUserSettings(uid).then(settings => {
+    if (active) callback(settings);
+  }).catch(error => console.warn('Firestore one-time settings load warning/error:', error));
+  return () => { active = false; };
 }

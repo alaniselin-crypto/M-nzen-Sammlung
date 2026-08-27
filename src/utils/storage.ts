@@ -4,6 +4,228 @@ const STORAGE_KEY = 'coin_collection_tracker_data_v1';
 const FOLDERS_STORAGE_KEY = 'coin_collection_custom_folders_v1';
 const PLATFORMS_STORAGE_KEY = 'coin_collection_custom_platforms_v1';
 
+const USER_COINS_STORAGE_KEY = 'coin_collection_tracker_data_v2';
+const USER_FOLDERS_STORAGE_KEY = 'coin_collection_custom_folders_v2';
+const USER_PLATFORMS_STORAGE_KEY = 'coin_collection_custom_platforms_v2';
+const USER_TOMBSTONES_STORAGE_KEY = 'coin_collection_tombstones_v1';
+const USER_PENDING_MUTATIONS_STORAGE_KEY = 'coin_collection_pending_mutations_v1';
+
+export interface LocalCoinTombstone {
+  coinId: string;
+  deletedAt: string;
+}
+
+export type PendingMutationType = 'upsertCoin' | 'deleteCoin' | 'saveSettings';
+
+export interface PendingMutation {
+  id: string;
+  type: PendingMutationType;
+  createdAt: string;
+  attempts: number;
+  coinId?: string;
+  coin?: Coin;
+  settings?: {
+    folders?: string[];
+    platforms?: string[];
+  };
+  lastError?: string;
+}
+
+function getUserStorageKey(baseKey: string, uid: string): string {
+  if (typeof uid !== 'string' || uid.length === 0) {
+    throw new Error('A Firebase UID is required for user-scoped local storage.');
+  }
+  return `${baseKey}:${encodeURIComponent(uid)}`;
+}
+
+function readUserArray<T>(baseKey: string, uid: string, isValid: (value: unknown) => value is T): T[] {
+  try {
+    const raw = localStorage.getItem(getUserStorageKey(baseKey, uid));
+    if (raw === null) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isValid) : [];
+  } catch (error) {
+    console.error(`Failed to load UID-scoped local data from ${baseKey}:`, error);
+    return [];
+  }
+}
+
+function writeUserArray<T>(baseKey: string, uid: string, values: T[]): void {
+  try {
+    localStorage.setItem(getUserStorageKey(baseKey, uid), JSON.stringify(values));
+  } catch (error) {
+    console.error(`Failed to save UID-scoped local data to ${baseKey}:`, error);
+  }
+}
+
+function isCoin(value: unknown): value is Coin {
+  return Boolean(value && typeof value === 'object' && typeof (value as Coin).id === 'string');
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isLocalCoinTombstone(value: unknown): value is LocalCoinTombstone {
+  if (!value || typeof value !== 'object') return false;
+  const tombstone = value as LocalCoinTombstone;
+  return typeof tombstone.coinId === 'string' && typeof tombstone.deletedAt === 'string';
+}
+
+function isPendingMutation(value: unknown): value is PendingMutation {
+  if (!value || typeof value !== 'object') return false;
+  const mutation = value as PendingMutation;
+  return typeof mutation.id === 'string'
+    && ['upsertCoin', 'deleteCoin', 'saveSettings'].includes(mutation.type)
+    && typeof mutation.createdAt === 'string'
+    && typeof mutation.attempts === 'number';
+}
+
+export function isPendingMutationPayloadValid(mutation: PendingMutation): boolean {
+  if (mutation.type === 'upsertCoin') {
+    return typeof mutation.coinId === 'string'
+      && mutation.coinId.length > 0
+      && Boolean(mutation.coin && typeof mutation.coin === 'object' && mutation.coin.id === mutation.coinId);
+  }
+  if (mutation.type === 'deleteCoin') {
+    return typeof mutation.coinId === 'string' && mutation.coinId.length > 0;
+  }
+  if (mutation.type === 'saveSettings') {
+    if (!mutation.settings || typeof mutation.settings !== 'object') return false;
+    return (mutation.settings.folders === undefined || (
+      Array.isArray(mutation.settings.folders) && mutation.settings.folders.every(isString)
+    )) && (mutation.settings.platforms === undefined || (
+      Array.isArray(mutation.settings.platforms) && mutation.settings.platforms.every(isString)
+    ));
+  }
+  return false;
+}
+
+function createPendingMutationId(): string {
+  return `mutation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export function loadUserCoinsFromStorage(uid: string): Coin[] {
+  return readUserArray(USER_COINS_STORAGE_KEY, uid, isCoin);
+}
+
+export function saveUserCoinsToStorage(uid: string, coins: Coin[]): void {
+  writeUserArray(USER_COINS_STORAGE_KEY, uid, coins);
+}
+
+export function loadUserFoldersFromStorage(uid: string): string[] {
+  return readUserArray(USER_FOLDERS_STORAGE_KEY, uid, isString);
+}
+
+export function saveUserFoldersToStorage(uid: string, folders: string[]): void {
+  writeUserArray(USER_FOLDERS_STORAGE_KEY, uid, folders);
+}
+
+export function loadUserPlatformsFromStorage(uid: string): string[] {
+  return readUserArray(USER_PLATFORMS_STORAGE_KEY, uid, isString);
+}
+
+export function saveUserPlatformsToStorage(uid: string, platforms: string[]): void {
+  writeUserArray(USER_PLATFORMS_STORAGE_KEY, uid, platforms);
+}
+
+export function loadUserCoinTombstones(uid: string): LocalCoinTombstone[] {
+  return readUserArray(USER_TOMBSTONES_STORAGE_KEY, uid, isLocalCoinTombstone);
+}
+
+export function saveUserCoinTombstones(uid: string, tombstones: LocalCoinTombstone[]): void {
+  writeUserArray(USER_TOMBSTONES_STORAGE_KEY, uid, tombstones);
+}
+
+export function upsertUserCoinTombstone(
+  uid: string,
+  coinId: string,
+  deletedAt: string = new Date().toISOString()
+): LocalCoinTombstone {
+  const tombstone = { coinId, deletedAt };
+  const remaining = loadUserCoinTombstones(uid).filter(existing => existing.coinId !== coinId);
+  saveUserCoinTombstones(uid, [...remaining, tombstone]);
+  return tombstone;
+}
+
+export function removeUserCoinTombstone(uid: string, coinId: string): void {
+  saveUserCoinTombstones(
+    uid,
+    loadUserCoinTombstones(uid).filter(tombstone => tombstone.coinId !== coinId)
+  );
+}
+
+export function loadUserPendingMutations(uid: string): PendingMutation[] {
+  return readUserArray(USER_PENDING_MUTATIONS_STORAGE_KEY, uid, isPendingMutation);
+}
+
+export function saveUserPendingMutations(uid: string, mutations: PendingMutation[]): void {
+  writeUserArray(USER_PENDING_MUTATIONS_STORAGE_KEY, uid, mutations);
+}
+
+export function enqueueUserPendingMutation(
+  uid: string,
+  mutation: Omit<PendingMutation, 'id' | 'createdAt' | 'attempts'>
+): PendingMutation {
+  const pendingMutation: PendingMutation = {
+    ...mutation,
+    id: createPendingMutationId(),
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+  };
+  const existing = loadUserPendingMutations(uid);
+  const remaining = existing.filter(item => {
+    if (mutation.type === 'saveSettings') return item.type !== 'saveSettings';
+    return !mutation.coinId || item.coinId !== mutation.coinId;
+  });
+  saveUserPendingMutations(uid, [...remaining, pendingMutation]);
+  return pendingMutation;
+}
+
+export function markUserCoinPending(uid: string, coin: Coin): PendingMutation {
+  return enqueueUserPendingMutation(uid, {
+    type: 'upsertCoin',
+    coinId: coin.id,
+    coin,
+  });
+}
+
+export function markUserCoinDeletionPending(
+  uid: string,
+  coinId: string,
+  deletedAt: string = new Date().toISOString()
+): PendingMutation {
+  upsertUserCoinTombstone(uid, coinId, deletedAt);
+  return enqueueUserPendingMutation(uid, {
+    type: 'deleteCoin',
+    coinId,
+  });
+}
+
+export function getPendingUserCoinIds(uid: string): Set<string> {
+  return new Set(
+    loadUserPendingMutations(uid)
+      .filter(mutation => mutation.coinId)
+      .map(mutation => mutation.coinId as string)
+  );
+}
+
+export function removeUserPendingMutation(uid: string, mutationId: string): void {
+  saveUserPendingMutations(
+    uid,
+    loadUserPendingMutations(uid).filter(mutation => mutation.id !== mutationId)
+  );
+}
+
+export function recordUserPendingMutationFailure(uid: string, mutationId: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const updated = loadUserPendingMutations(uid).map(mutation => mutation.id === mutationId
+    ? { ...mutation, attempts: mutation.attempts + 1, lastError: message }
+    : mutation
+  );
+  saveUserPendingMutations(uid, updated);
+}
+
 export const DEFAULT_INITIAL_FOLDERS = [
   'Ordner 1 - Schweiz',
   'Ordner 2 - Europa',
@@ -513,4 +735,3 @@ export function getCoinTitle(coin: Partial<Coin>): string {
   const generated = parts.join(' ');
   return generated.trim() || 'Münze';
 }
-

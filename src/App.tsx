@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Coin, TabType } from './types';
 import { 
   loadCoinsFromStorage, 
   saveCoinsToStorage, 
   resetCoinsToSampleData, 
+  INITIAL_SAMPLE_COINS,
   generateNextCatalogNumber,
   loadCustomFolders,
   saveCustomFolders,
@@ -14,17 +15,30 @@ import {
   renamePlatformInCoinsAndStorage,
   deletePlatformInStorage,
   formatSKU,
-  getCoinTitle
+  getCoinTitle,
+  loadUserCoinsFromStorage,
+  saveUserCoinsToStorage,
+  loadUserFoldersFromStorage,
+  saveUserFoldersToStorage,
+  loadUserPlatformsFromStorage,
+  saveUserPlatformsToStorage,
+  loadUserCoinTombstones,
+  saveUserCoinTombstones,
+  loadUserPendingMutations,
+  enqueueUserPendingMutation,
+  markUserCoinPending,
+  markUserCoinDeletionPending,
+  removeUserPendingMutation,
+  recordUserPendingMutationFailure,
+  isPendingMutationPayloadValid
 } from './utils/storage';
 import { parseImageSideAndBaseName } from './utils/csv';
-import { 
-  subscribeToUserCoins, 
+import {
+  fetchUserCoinSyncSnapshot,
+  fetchUserSettings,
   saveCoinToFirestore, 
   deleteCoinFromFirestore, 
-  clearAllCoinsFromFirestore,
-  subscribeToUserSettings, 
-  saveUserSettingsToFirestore, 
-  syncLocalDataToFirestore 
+  saveUserSettingsToFirestore
 } from './utils/firestoreStorage';
 import { useAuth } from './context/AuthContext';
 
@@ -46,6 +60,7 @@ import { HeroDownloadModal } from './components/HeroDownloadModal';
 
 export default function App() {
   const { user, loading } = useAuth();
+  const userUid = user?.uid ?? null;
 
   const [coins, setCoins] = useState<Coin[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -65,6 +80,7 @@ export default function App() {
   const [isHeroModalOpen, setIsHeroModalOpen] = useState<boolean>(false);
   const [importToast, setImportToast] = useState<string | null>(null);
   const [isFetchingWebhooks, setIsFetchingWebhooks] = useState<boolean>(false);
+  const webhookImportRunningRef = useRef(false);
 
   // Helper to ensure catalogNumber / SKU is populated (5-digit auto-counter)
   const ensureCoinSKUs = (rawCoins: Coin[]): Coin[] => {
@@ -97,56 +113,152 @@ export default function App() {
     });
   };
 
+  const persistCoinForUser = async (uid: string, coin: Coin): Promise<void> => {
+    const mutation = markUserCoinPending(uid, coin);
+    try {
+      await saveCoinToFirestore(uid, coin);
+      removeUserPendingMutation(uid, mutation.id);
+    } catch (error) {
+      recordUserPendingMutationFailure(uid, mutation.id, error);
+      throw error;
+    }
+  };
+
+  const persistCoinDeletionForUser = async (uid: string, coinId: string): Promise<void> => {
+    const mutation = markUserCoinDeletionPending(uid, coinId);
+    try {
+      await deleteCoinFromFirestore(uid, coinId);
+      removeUserPendingMutation(uid, mutation.id);
+    } catch (error) {
+      recordUserPendingMutationFailure(uid, mutation.id, error);
+      throw error;
+    }
+  };
+
+  const persistSettingsForUser = async (
+    uid: string,
+    nextFolders: string[],
+    nextPlatforms: string[]
+  ): Promise<void> => {
+    saveUserFoldersToStorage(uid, nextFolders);
+    saveUserPlatformsToStorage(uid, nextPlatforms);
+    const mutation = enqueueUserPendingMutation(uid, {
+      type: 'saveSettings',
+      settings: { folders: nextFolders, platforms: nextPlatforms },
+    });
+    try {
+      await saveUserSettingsToFirestore(uid, { folders: nextFolders, platforms: nextPlatforms });
+      removeUserPendingMutation(uid, mutation.id);
+    } catch (error) {
+      recordUserPendingMutationFailure(uid, mutation.id, error);
+      throw error;
+    }
+  };
+
+  const flushPendingMutations = async (uid: string, cloudTombstoneIds: Set<string>): Promise<void> => {
+    const pending = loadUserPendingMutations(uid);
+    for (const mutation of pending) {
+      if (!isPendingMutationPayloadValid(mutation)) {
+        recordUserPendingMutationFailure(uid, mutation.id, new Error('Invalid or incomplete pending mutation payload.'));
+        continue;
+      }
+      try {
+        if (mutation.type === 'upsertCoin' && mutation.coin) {
+          if (cloudTombstoneIds.has(mutation.coin.id)) {
+            removeUserPendingMutation(uid, mutation.id);
+            continue;
+          }
+          await saveCoinToFirestore(uid, mutation.coin);
+        } else if (mutation.type === 'deleteCoin' && mutation.coinId) {
+          await deleteCoinFromFirestore(uid, mutation.coinId);
+        } else if (mutation.type === 'saveSettings' && mutation.settings) {
+          await saveUserSettingsToFirestore(uid, mutation.settings);
+        }
+        removeUserPendingMutation(uid, mutation.id);
+      } catch (error) {
+        recordUserPendingMutationFailure(uid, mutation.id, error);
+      }
+    }
+  };
+
   // Initial Load & User Auth Sync
   useEffect(() => {
     if (loading) return;
 
-    if (user) {
-      // 1. One-time initial sync of offline local storage coins to Firestore
-      const localCoinsBeforeSync = ensureCoinSKUs(loadCoinsFromStorage());
-      if (localCoinsBeforeSync.length > 0) {
-        syncLocalDataToFirestore(user.uid, localCoinsBeforeSync, loadCustomFolders(), loadCustomPlatforms());
-      }
+    if (userUid) {
+      let cancelled = false;
+      const localCoins = ensureCoinSKUs(loadUserCoinsFromStorage(userUid));
+      const localFolders = loadUserFoldersFromStorage(userUid);
+      const localPlatforms = loadUserPlatformsFromStorage(userUid);
+      setCoins(localCoins);
+      setFolders(localFolders);
+      setPlatforms(localPlatforms);
 
-      // 2. Subscribe to Firestore coins as single source of truth
-      const unsubscribeCoins = subscribeToUserCoins(user.uid, (cloudCoins) => {
-        const processed = ensureCoinSKUs(cloudCoins);
-        setCoins(processed);
-        saveCoinsToStorage(processed);
-      });
+      void (async () => {
+        try {
+          const [snapshot, settings] = await Promise.all([
+            fetchUserCoinSyncSnapshot(userUid),
+            fetchUserSettings(userUid),
+          ]);
+          if (cancelled) return;
 
-      // 3. Subscribe to Firestore settings (folders & platforms)
-      const unsubscribeSettings = subscribeToUserSettings(user.uid, (settings) => {
-        if (settings.folders && settings.folders.length > 0) {
-          setFolders(settings.folders);
-        } else {
-          setFolders(loadCustomFolders());
+          const cloudTombstoneIds = new Set(snapshot.tombstones.map(tombstone => tombstone.coinId));
+          const localTombstones = loadUserCoinTombstones(userUid);
+          const allTombstoneIds = new Set([
+            ...cloudTombstoneIds,
+            ...localTombstones.map(tombstone => tombstone.coinId),
+          ]);
+          const cloudCoins = snapshot.coins.filter(coin => !allTombstoneIds.has(coin.id));
+          const pendingUpserts = loadUserPendingMutations(userUid)
+            .filter(mutation => mutation.type === 'upsertCoin' && mutation.coin && !allTombstoneIds.has(mutation.coin.id))
+            .map(mutation => mutation.coin as Coin);
+          const mergedById = new Map(cloudCoins.map(coin => [coin.id, coin]));
+          pendingUpserts.forEach(coin => mergedById.set(coin.id, coin));
+          const mergedCoins = ensureCoinSKUs(Array.from(mergedById.values()));
+
+          const cloudTombstones = snapshot.tombstones.map(tombstone => ({
+            coinId: tombstone.coinId,
+            deletedAt: typeof (tombstone.deletedAt as { toDate?: () => Date } | null)?.toDate === 'function'
+              ? (tombstone.deletedAt as { toDate: () => Date }).toDate().toISOString()
+              : new Date().toISOString(),
+          }));
+          const tombstonesById = new Map(localTombstones.map(tombstone => [tombstone.coinId, tombstone]));
+          cloudTombstones.forEach(tombstone => tombstonesById.set(tombstone.coinId, tombstone));
+
+          setCoins(mergedCoins);
+          saveUserCoinsToStorage(userUid, mergedCoins);
+          saveUserCoinTombstones(userUid, Array.from(tombstonesById.values()));
+
+          const nextFolders = settings.folders ?? localFolders;
+          const nextPlatforms = settings.platforms ?? localPlatforms;
+          const pendingSettings = loadUserPendingMutations(userUid)
+            .filter(mutation => mutation.type === 'saveSettings' && mutation.settings)
+            .at(-1)?.settings;
+          const effectiveFolders = pendingSettings?.folders ?? nextFolders;
+          const effectivePlatforms = pendingSettings?.platforms ?? nextPlatforms;
+          setFolders(effectiveFolders);
+          setPlatforms(effectivePlatforms);
+          saveUserFoldersToStorage(userUid, effectiveFolders);
+          saveUserPlatformsToStorage(userUid, effectivePlatforms);
+
+          await flushPendingMutations(userUid, cloudTombstoneIds);
+        } catch (error) {
+          console.error('Initial UID-scoped cloud sync failed; continuing with local data:', error);
         }
+      })();
 
-        if (settings.platforms && settings.platforms.length > 0) {
-          setPlatforms(settings.platforms);
-        } else {
-          setPlatforms(loadCustomPlatforms());
-        }
-      });
-
-      return () => {
-        unsubscribeCoins();
-        unsubscribeSettings();
-      };
+      return () => { cancelled = true; };
     } else {
-      // Guest / Offline LocalStorage Load
-      const loaded = ensureCoinSKUs(loadCoinsFromStorage());
-      setCoins(loaded);
-      const loadedFolders = loadCustomFolders(loaded);
-      setFolders(loadedFolders);
-      const loadedPlatforms = loadCustomPlatforms(loaded);
-      setPlatforms(loadedPlatforms);
+      setCoins([]);
+      setFolders([]);
+      setPlatforms([]);
     }
-  }, [user, loading]);
+  }, [userUid, loading]);
 
   // Polling Make.com Webhook Pending Items
   const handleFetchPendingWebhooks = async (isManual = false) => {
+    if (!userUid || webhookImportRunningRef.current) return;
+    webhookImportRunningRef.current = true;
     if (isManual) setIsFetchingWebhooks(true);
     try {
       const res = await fetch('/api/webhook/make/pending');
@@ -209,11 +321,9 @@ export default function App() {
 
           const coinsToSave: Coin[] = [];
           const addedFolders = new Set<string>();
+          const updated = [...loadUserCoinsFromStorage(userUid)];
 
-          setCoins(prev => {
-            const updated = [...prev];
-
-            newWebhookCoins.forEach((newCoin) => {
+          newWebhookCoins.forEach((newCoin) => {
               if (newCoin.storageLocation) {
                 addedFolders.add(newCoin.storageLocation);
               }
@@ -280,35 +390,60 @@ export default function App() {
                 updated.unshift(freshCoin);
                 coinsToSave.push(freshCoin);
               }
-            });
-
-            const processedUpdated = ensureCoinSKUs(updated);
-            saveCoinsToStorage(processedUpdated);
-            return processedUpdated;
           });
 
-          // Async save to Firestore for all imported/updated coins
-          if (user) {
-            for (const c of coinsToSave) {
-              await saveCoinToFirestore(user.uid, c);
+          const processedUpdated = ensureCoinSKUs(updated);
+          saveUserCoinsToStorage(userUid, processedUpdated);
+          const locallyStored = loadUserCoinsFromStorage(userUid);
+          const localIds = new Set(locallyStored.map(coin => coin.id));
+          if (locallyStored.length !== processedUpdated.length || processedUpdated.some(coin => !localIds.has(coin.id))) {
+            throw new Error('Webhook import could not be persisted in the UID-scoped local cache.');
+          }
+          setCoins(processedUpdated);
+
+          const processedById = new Map(processedUpdated.map(coin => [coin.id, coin]));
+          const uniqueCoinsToSave = Array.from(new Set(coinsToSave.map(coin => coin.id)))
+            .map(coinId => processedById.get(coinId))
+            .filter((coin): coin is Coin => Boolean(coin));
+          const pendingCoinWrites = uniqueCoinsToSave.map(coin => ({
+            coin,
+            mutation: markUserCoinPending(userUid, coin),
+          }));
+          for (const { coin, mutation } of pendingCoinWrites) {
+            try {
+              await saveCoinToFirestore(userUid, coin);
+              removeUserPendingMutation(userUid, mutation.id);
+            } catch (error) {
+              recordUserPendingMutationFailure(userUid, mutation.id, error);
+              const remainsPending = loadUserPendingMutations(userUid).some(item => item.id === mutation.id);
+              if (!remainsPending) throw error;
             }
           }
 
           // Update folders list if new folders exist
           if (addedFolders.size > 0) {
-            setFolders(oldFolders => {
-              const merged = Array.from(new Set([...oldFolders, ...Array.from(addedFolders)]));
-              if (user) {
-                saveUserSettingsToFirestore(user.uid, { folders: merged, platforms });
-              } else {
-                saveCustomFolders(merged);
-              }
-              return merged;
+            const currentFolders = loadUserFoldersFromStorage(userUid);
+            const currentPlatforms = loadUserPlatformsFromStorage(userUid);
+            const merged = Array.from(new Set([...currentFolders, ...Array.from(addedFolders)]));
+            setFolders(merged);
+            saveUserFoldersToStorage(userUid, merged);
+            saveUserPlatformsToStorage(userUid, currentPlatforms);
+            const settingsMutation = enqueueUserPendingMutation(userUid, {
+              type: 'saveSettings',
+              settings: { folders: merged, platforms: currentPlatforms },
             });
+            try {
+              await saveUserSettingsToFirestore(userUid, { folders: merged, platforms: currentPlatforms });
+              removeUserPendingMutation(userUid, settingsMutation.id);
+            } catch (error) {
+              recordUserPendingMutationFailure(userUid, settingsMutation.id, error);
+              const remainsPending = loadUserPendingMutations(userUid).some(item => item.id === settingsMutation.id);
+              if (!remainsPending) throw error;
+            }
           }
 
-          // Clear server queue only AFTER successful local and cloud persistence!
-          await fetch('/api/webhook/make/clear', { method: 'POST' }).catch(() => {});
+          const clearResponse = await fetch('/api/webhook/make/clear', { method: 'POST' });
+          if (!clearResponse.ok) throw new Error(`Webhook queue could not be cleared: HTTP ${clearResponse.status}`);
 
           setImportToast(`🎉 ${newWebhookCoins.length} Münze(n) via Google Drive Import hinzugefügt!`);
           setTimeout(() => setImportToast(null), 6000);
@@ -325,6 +460,7 @@ export default function App() {
       }
     } finally {
       if (isManual) setIsFetchingWebhooks(false);
+      webhookImportRunningRef.current = false;
     }
   };
 
@@ -351,56 +487,104 @@ export default function App() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [user]);
+  }, [userUid]);
 
   // Sync Local Data to Cloud
   const handleSyncLocalDataToCloud = async () => {
-    if (!user) return;
-    const localCoins = loadCoinsFromStorage();
-    const localFolders = loadCustomFolders(localCoins);
-    const localPlatforms = loadCustomPlatforms(localCoins);
+    if (!userUid) return;
+    const snapshot = await fetchUserCoinSyncSnapshot(userUid);
+    const cloudTombstoneIds = new Set(snapshot.tombstones.map(tombstone => tombstone.coinId));
+    await flushPendingMutations(userUid, cloudTombstoneIds);
 
-    await syncLocalDataToFirestore(user.uid, localCoins, localFolders, localPlatforms);
+    const refreshed = await fetchUserCoinSyncSnapshot(userUid);
+    const refreshedTombstoneIds = new Set(refreshed.tombstones.map(tombstone => tombstone.coinId));
+    const localTombstoneIds = new Set(loadUserCoinTombstones(userUid).map(tombstone => tombstone.coinId));
+    const mergedById = new Map(
+      refreshed.coins
+        .filter(coin => !refreshedTombstoneIds.has(coin.id) && !localTombstoneIds.has(coin.id))
+        .map(coin => [coin.id, coin])
+    );
+    loadUserPendingMutations(userUid)
+      .filter(mutation => mutation.type === 'upsertCoin' && mutation.coin
+        && !refreshedTombstoneIds.has(mutation.coin.id)
+        && !localTombstoneIds.has(mutation.coin.id))
+      .forEach(mutation => mergedById.set((mutation.coin as Coin).id, mutation.coin as Coin));
+    const processed = ensureCoinSKUs(Array.from(mergedById.values()));
+    setCoins(processed);
+    saveUserCoinsToStorage(userUid, processed);
   };
 
   // Sync state to LocalStorage & State
   const updateCoinsState = (newCoins: Coin[]) => {
     const processed = ensureCoinSKUs(newCoins);
     setCoins(processed);
-    saveCoinsToStorage(processed);
-    const updatedFolders = loadCustomFolders(processed);
+    if (userUid) {
+      saveUserCoinsToStorage(userUid, processed);
+    } else {
+      saveCoinsToStorage(processed);
+    }
+    const storedFolders = userUid ? loadUserFoldersFromStorage(userUid) : loadCustomFolders(processed);
+    const updatedFolders = Array.from(new Set([
+      ...storedFolders,
+      ...processed.map(coin => coin.storageLocation).filter((value): value is string => Boolean(value && value.trim())),
+    ]));
     setFolders(updatedFolders);
-    const updatedPlatforms = loadCustomPlatforms(processed);
+    const storedPlatforms = userUid ? loadUserPlatformsFromStorage(userUid) : loadCustomPlatforms(processed);
+    const updatedPlatforms = Array.from(new Set([
+      ...storedPlatforms,
+      ...processed.map(coin => coin.listingPlatform).filter((value): value is string => Boolean(value && value.trim())),
+    ]));
     setPlatforms(updatedPlatforms);
   };
 
   // Folder Management Handlers
-  const handleAddFolder = (folderName: string) => {
+  const handleAddFolder = async (folderName: string) => {
     const trimmed = folderName.trim();
     if (!trimmed) return;
     if (!folders.includes(trimmed)) {
       const updated = [...folders, trimmed];
       setFolders(updated);
-      if (user) {
-        saveUserSettingsToFirestore(user.uid, { folders: updated, platforms });
+      if (userUid) {
+        try {
+          await persistSettingsForUser(userUid, updated, platforms);
+        } catch (error) {
+          console.error('Folder settings write queued for retry:', error);
+        }
       } else {
         saveCustomFolders(updated);
       }
     }
   };
 
-  const handleRenameFolder = (oldName: string, newName: string) => {
-    const { updatedCoins, updatedFolders } = renameFolderInCoinsAndStorage(oldName, newName, coins, folders);
+  const handleRenameFolder = async (oldName: string, newName: string) => {
+    const trimmedName = newName.trim();
+    const { updatedCoins, updatedFolders } = userUid
+      ? {
+          updatedCoins: coins.map(coin => coin.storageLocation === oldName
+            ? { ...coin, storageLocation: trimmedName, updatedAt: new Date().toISOString() }
+            : coin),
+          updatedFolders: Array.from(new Set<string>(folders.map(folder => folder === oldName ? trimmedName : folder))),
+        }
+      : renameFolderInCoinsAndStorage(oldName, newName, coins, folders);
     setCoins(updatedCoins);
     setFolders(updatedFolders);
 
-    if (user) {
-      saveUserSettingsToFirestore(user.uid, { folders: updatedFolders, platforms });
-      updatedCoins.forEach(c => {
-        if (c.storageLocation === newName.trim()) {
-          saveCoinToFirestore(user.uid, c);
+    if (userUid) {
+      saveUserCoinsToStorage(userUid, updatedCoins);
+      try {
+        await persistSettingsForUser(userUid, updatedFolders, platforms);
+      } catch (error) {
+        console.error('Folder settings write queued for retry:', error);
+      }
+      for (const coin of updatedCoins) {
+        if (coin.storageLocation === trimmedName && coins.find(existing => existing.id === coin.id)?.storageLocation === oldName) {
+          try {
+            await persistCoinForUser(userUid, coin);
+          } catch (error) {
+            console.error('Folder coin write queued for retry:', error);
+          }
         }
-      });
+      }
     }
 
     if (detailCoin && detailCoin.storageLocation === oldName) {
@@ -411,18 +595,34 @@ export default function App() {
     }
   };
 
-  const handleDeleteFolder = (folderName: string) => {
-    const { updatedCoins, updatedFolders } = deleteFolderInStorage(folderName, coins, folders);
+  const handleDeleteFolder = async (folderName: string) => {
+    const { updatedCoins, updatedFolders } = userUid
+      ? {
+          updatedCoins: coins.map(coin => coin.storageLocation === folderName
+            ? { ...coin, storageLocation: '', updatedAt: new Date().toISOString() }
+            : coin),
+          updatedFolders: folders.filter(folder => folder !== folderName),
+        }
+      : deleteFolderInStorage(folderName, coins, folders);
     setCoins(updatedCoins);
     setFolders(updatedFolders);
 
-    if (user) {
-      saveUserSettingsToFirestore(user.uid, { folders: updatedFolders, platforms });
-      updatedCoins.forEach(c => {
-        if (c.storageLocation === '') {
-          saveCoinToFirestore(user.uid, c);
+    if (userUid) {
+      saveUserCoinsToStorage(userUid, updatedCoins);
+      try {
+        await persistSettingsForUser(userUid, updatedFolders, platforms);
+      } catch (error) {
+        console.error('Folder settings write queued for retry:', error);
+      }
+      for (const coin of updatedCoins) {
+        if (coin.storageLocation === '' && coins.find(existing => existing.id === coin.id)?.storageLocation === folderName) {
+          try {
+            await persistCoinForUser(userUid, coin);
+          } catch (error) {
+            console.error('Folder coin write queued for retry:', error);
+          }
         }
-      });
+      }
     }
 
     if (detailCoin && detailCoin.storageLocation === folderName) {
@@ -434,32 +634,53 @@ export default function App() {
   };
 
   // Platform Management Handlers
-  const handleAddPlatform = (platformName: string) => {
+  const handleAddPlatform = async (platformName: string) => {
     const trimmed = platformName.trim();
     if (!trimmed) return;
     if (!platforms.includes(trimmed)) {
       const updated = [...platforms, trimmed];
       setPlatforms(updated);
-      if (user) {
-        saveUserSettingsToFirestore(user.uid, { folders, platforms: updated });
+      if (userUid) {
+        try {
+          await persistSettingsForUser(userUid, folders, updated);
+        } catch (error) {
+          console.error('Platform settings write queued for retry:', error);
+        }
       } else {
         saveCustomPlatforms(updated);
       }
     }
   };
 
-  const handleRenamePlatform = (oldName: string, newName: string) => {
-    const { updatedCoins, updatedPlatforms } = renamePlatformInCoinsAndStorage(oldName, newName, coins, platforms);
+  const handleRenamePlatform = async (oldName: string, newName: string) => {
+    const trimmedName = newName.trim();
+    const { updatedCoins, updatedPlatforms } = userUid
+      ? {
+          updatedCoins: coins.map(coin => coin.listingPlatform === oldName
+            ? { ...coin, listingPlatform: trimmedName, updatedAt: new Date().toISOString() }
+            : coin),
+          updatedPlatforms: Array.from(new Set<string>(platforms.map(platform => platform === oldName ? trimmedName : platform))),
+        }
+      : renamePlatformInCoinsAndStorage(oldName, newName, coins, platforms);
     setCoins(updatedCoins);
     setPlatforms(updatedPlatforms);
 
-    if (user) {
-      saveUserSettingsToFirestore(user.uid, { folders, platforms: updatedPlatforms });
-      updatedCoins.forEach(c => {
-        if (c.listingPlatform === newName.trim()) {
-          saveCoinToFirestore(user.uid, c);
+    if (userUid) {
+      saveUserCoinsToStorage(userUid, updatedCoins);
+      try {
+        await persistSettingsForUser(userUid, folders, updatedPlatforms);
+      } catch (error) {
+        console.error('Platform settings write queued for retry:', error);
+      }
+      for (const coin of updatedCoins) {
+        if (coin.listingPlatform === trimmedName && coins.find(existing => existing.id === coin.id)?.listingPlatform === oldName) {
+          try {
+            await persistCoinForUser(userUid, coin);
+          } catch (error) {
+            console.error('Platform coin write queued for retry:', error);
+          }
         }
-      });
+      }
     }
 
     if (detailCoin && detailCoin.listingPlatform === oldName) {
@@ -470,18 +691,34 @@ export default function App() {
     }
   };
 
-  const handleDeletePlatform = (platformName: string) => {
-    const { updatedCoins, updatedPlatforms } = deletePlatformInStorage(platformName, coins, platforms);
+  const handleDeletePlatform = async (platformName: string) => {
+    const { updatedCoins, updatedPlatforms } = userUid
+      ? {
+          updatedCoins: coins.map(coin => coin.listingPlatform === platformName
+            ? { ...coin, listingPlatform: '', updatedAt: new Date().toISOString() }
+            : coin),
+          updatedPlatforms: platforms.filter(platform => platform !== platformName),
+        }
+      : deletePlatformInStorage(platformName, coins, platforms);
     setCoins(updatedCoins);
     setPlatforms(updatedPlatforms);
 
-    if (user) {
-      saveUserSettingsToFirestore(user.uid, { folders, platforms: updatedPlatforms });
-      updatedCoins.forEach(c => {
-        if (c.listingPlatform === '') {
-          saveCoinToFirestore(user.uid, c);
+    if (userUid) {
+      saveUserCoinsToStorage(userUid, updatedCoins);
+      try {
+        await persistSettingsForUser(userUid, folders, updatedPlatforms);
+      } catch (error) {
+        console.error('Platform settings write queued for retry:', error);
+      }
+      for (const coin of updatedCoins) {
+        if (coin.listingPlatform === '' && coins.find(existing => existing.id === coin.id)?.listingPlatform === platformName) {
+          try {
+            await persistCoinForUser(userUid, coin);
+          } catch (error) {
+            console.error('Platform coin write queued for retry:', error);
+          }
         }
-      });
+      }
     }
 
     if (detailCoin && detailCoin.listingPlatform === platformName) {
@@ -493,7 +730,7 @@ export default function App() {
   };
 
   // Add / Edit Coin Handler
-  const handleSaveCoin = (coinData: Omit<Coin, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
+  const handleSaveCoin = async (coinData: Omit<Coin, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
     const now = new Date().toISOString();
 
     if (coinData.id) {
@@ -510,8 +747,12 @@ export default function App() {
       const updatedList = coins.map(c => c.id === coinData.id ? updatedCoin : c);
       updateCoinsState(updatedList);
 
-      if (user) {
-        saveCoinToFirestore(user.uid, updatedCoin);
+      if (userUid) {
+        try {
+          await persistCoinForUser(userUid, updatedCoin);
+        } catch (error) {
+          console.error('Coin update queued for retry:', error);
+        }
       }
     } else {
       // Add new
@@ -526,8 +767,12 @@ export default function App() {
       const updatedList = [newCoin, ...coins];
       updateCoinsState(updatedList);
 
-      if (user) {
-        saveCoinToFirestore(user.uid, newCoin);
+      if (userUid) {
+        try {
+          await persistCoinForUser(userUid, newCoin);
+        } catch (error) {
+          console.error('New coin queued for retry:', error);
+        }
       }
     }
 
@@ -535,7 +780,7 @@ export default function App() {
   };
 
   // Duplicate Coin Handler
-  const handleDuplicateCoin = (sourceCoin: Coin) => {
+  const handleDuplicateCoin = async (sourceCoin: Coin) => {
     const now = new Date().toISOString();
     const nextNum = generateNextCatalogNumber(coins);
     const duplicatedCoin: Coin = {
@@ -547,10 +792,13 @@ export default function App() {
       updatedAt: now
     };
 
-    if (user) {
-      saveCoinToFirestore(user.uid, duplicatedCoin);
-    } else {
-      updateCoinsState([duplicatedCoin, ...coins]);
+    updateCoinsState([duplicatedCoin, ...coins]);
+    if (userUid) {
+      try {
+        await persistCoinForUser(userUid, duplicatedCoin);
+      } catch (error) {
+        console.error('Duplicated coin queued for retry:', error);
+      }
     }
   };
 
@@ -562,15 +810,19 @@ export default function App() {
     }
   };
 
-  const handleConfirmDeleteCoin = () => {
+  const handleConfirmDeleteCoin = async () => {
     if (!coinToDelete) return;
     const targetId = coinToDelete.id;
 
     const updatedList = coins.filter(c => c.id !== targetId);
     updateCoinsState(updatedList);
 
-    if (user) {
-      deleteCoinFromFirestore(user.uid, targetId);
+    if (userUid) {
+      try {
+        await persistCoinDeletionForUser(userUid, targetId);
+      } catch (error) {
+        console.error('Coin deletion queued for retry:', error);
+      }
     }
 
     if (detailCoin?.id === targetId) {
@@ -580,17 +832,20 @@ export default function App() {
   };
 
   // Toggle Favorite
-  const handleToggleFavorite = (coinId: string) => {
+  const handleToggleFavorite = async (coinId: string) => {
     const found = coins.find(c => c.id === coinId);
     if (!found) return;
 
     const updatedCoin = { ...found, isFavorite: !found.isFavorite, updatedAt: new Date().toISOString() };
 
-    if (user) {
-      saveCoinToFirestore(user.uid, updatedCoin);
-    } else {
-      const updatedList = coins.map(c => c.id === coinId ? updatedCoin : c);
-      updateCoinsState(updatedList);
+    const updatedList = coins.map(c => c.id === coinId ? updatedCoin : c);
+    updateCoinsState(updatedList);
+    if (userUid) {
+      try {
+        await persistCoinForUser(userUid, updatedCoin);
+      } catch (error) {
+        console.error('Favorite change queued for retry:', error);
+      }
     }
 
     if (detailCoin?.id === coinId) {
@@ -599,13 +854,34 @@ export default function App() {
   };
 
   // CSV Import Handler
-  const handleImportCoins = (newCoins: Coin[], replaceExisting: boolean) => {
-    if (user) {
+  const handleImportCoins = async (newCoins: Coin[], replaceExisting: boolean) => {
+    if (userUid) {
       if (replaceExisting) {
-        // Delete current coins
-        coins.forEach(c => deleteCoinFromFirestore(user.uid, c.id));
+        const importedIds = new Set(newCoins.map(coin => coin.id));
+        for (const coin of coins) {
+          if (!importedIds.has(coin.id)) {
+            try {
+              await persistCoinDeletionForUser(userUid, coin.id);
+            } catch (error) {
+              console.error('Replaced coin deletion queued for retry:', error);
+            }
+          }
+        }
       }
-      newCoins.forEach(nc => saveCoinToFirestore(user.uid, nc));
+      const existingIds = new Set(replaceExisting ? [] : coins.map(coin => coin.id));
+      const importedCoins = newCoins.map(coin => existingIds.has(coin.id)
+        ? { ...coin, id: `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` }
+        : coin
+      );
+      const nextCoins = replaceExisting ? importedCoins : [...coins, ...importedCoins];
+      updateCoinsState(nextCoins);
+      for (const coin of importedCoins) {
+        try {
+          await persistCoinForUser(userUid, coin);
+        } catch (error) {
+          console.error('Imported coin queued for retry:', error);
+        }
+      }
     } else {
       if (replaceExisting) {
         updateCoinsState(newCoins);
@@ -626,12 +902,32 @@ export default function App() {
 
   // Reset Data Handler
   const handleResetToSampleData = async () => {
-    const resetList = resetCoinsToSampleData();
+    const resetIdPrefix = `sample-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const resetList = userUid
+      ? INITIAL_SAMPLE_COINS.map((coin, index) => ({
+          ...coin,
+          id: `${resetIdPrefix}-${index + 1}`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }))
+      : resetCoinsToSampleData();
+    if (userUid) {
+      for (const coin of coins) {
+        try {
+          await persistCoinDeletionForUser(userUid, coin.id);
+        } catch (error) {
+          console.error('Reset deletion queued for retry:', error);
+        }
+      }
+    }
     updateCoinsState(resetList);
-    if (user) {
-      await clearAllCoinsFromFirestore(user.uid);
-      for (const c of resetList) {
-        await saveCoinToFirestore(user.uid, c);
+    if (userUid) {
+      for (const coin of resetList) {
+        try {
+          await persistCoinForUser(userUid, coin);
+        } catch (error) {
+          console.error('Reset sample coin queued for retry:', error);
+        }
       }
     }
   };
@@ -639,8 +935,14 @@ export default function App() {
   // Clear All Coins Handler
   const handleClearAllCoins = async () => {
     updateCoinsState([]);
-    if (user) {
-      await clearAllCoinsFromFirestore(user.uid);
+    if (userUid) {
+      for (const coin of coins) {
+        try {
+          await persistCoinDeletionForUser(userUid, coin.id);
+        } catch (error) {
+          console.error('Clear-all deletion queued for retry:', error);
+        }
+      }
     }
   };
 
@@ -772,7 +1074,7 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onSyncLocalData={handleSyncLocalDataToCloud}
-        hasLocalCoinsCount={loadCoinsFromStorage().length}
+        hasLocalCoinsCount={userUid ? loadUserCoinsFromStorage(userUid).length : 0}
       />
 
       <CoinDetailModal
@@ -846,4 +1148,3 @@ export default function App() {
     </div>
   );
 }
-
