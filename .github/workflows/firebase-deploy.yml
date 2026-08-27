@@ -15,4 +15,3 @@ jobs:
           args: deploy --only firestore:rules
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          PROJECT_PATH: electron
