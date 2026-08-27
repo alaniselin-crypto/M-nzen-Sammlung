@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const APP_URL = 'http://localhost:3000';
-const DESKTOP_TOKEN_EXCHANGE_URL = 'https://inumis.app/api/oauth/google/desktop/token';
+const DESKTOP_TOKEN_EXCHANGE_URL = 'https://inumis-node-backend.onrender.com/api/oauth/google/desktop/token';
 const GOOGLE_DESKTOP_CLIENT_ID = '211237775065-c5l25t57c5oe9bl02gkl2p93qq0mchok.apps.googleusercontent.com';
 const GOOGLE_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 let serverProcess = null;
