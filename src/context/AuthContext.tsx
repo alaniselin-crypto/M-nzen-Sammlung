@@ -78,6 +78,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signInWithCredential(auth, credential);
       return;
     }
+    const electronAuth = (window as typeof window & {
+      electronAuth?: {
+        signInWithGoogle: () => Promise<{ idToken: string; accessToken: string | null }>;
+      };
+    }).electronAuth;
+    if (electronAuth) {
+      const { idToken, accessToken } = await electronAuth.signInWithGoogle();
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      await signInWithCredential(auth, credential);
+      return;
+    }
     await signInWithPopup(auth, googleProvider);
   };
 

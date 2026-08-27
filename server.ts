@@ -9,7 +9,134 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+  const GOOGLE_DESKTOP_CLIENT_ID = "211237775065-c5l25t57c5oe9bl02gkl2p93qq0mchok.apps.googleusercontent.com";
+  const desktopOAuthAttempts = new Map<string, { count: number; resetAt: number }>();
+
+  app.post(
+    "/api/oauth/google/desktop/token",
+    express.json({ limit: "8kb", type: "application/json" }),
+    async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Pragma", "no-cache");
+
+      if (req.headers.origin) {
+        return res.status(403).json({ error: "oauth/browser-request-denied" });
+      }
+
+      const now = Date.now();
+      const rateLimitKey = req.socket.remoteAddress || "unknown";
+      const currentLimit = desktopOAuthAttempts.get(rateLimitKey);
+      const rateLimit = !currentLimit || currentLimit.resetAt <= now
+        ? { count: 1, resetAt: now + 10 * 60 * 1000 }
+        : { count: currentLimit.count + 1, resetAt: currentLimit.resetAt };
+      desktopOAuthAttempts.set(rateLimitKey, rateLimit);
+      if (desktopOAuthAttempts.size > 10_000) {
+        for (const [key, value] of desktopOAuthAttempts) {
+          if (value.resetAt <= now) desktopOAuthAttempts.delete(key);
+        }
+      }
+      if (rateLimit.count > 30) {
+        res.setHeader("Retry-After", String(Math.ceil((rateLimit.resetAt - now) / 1000)));
+        return res.status(429).json({ error: "oauth/rate-limited" });
+      }
+
+      const clientSecret = process.env.GOOGLE_DESKTOP_CLIENT_SECRET;
+      if (!clientSecret) {
+        return res.status(503).json({ error: "oauth/server-not-configured" });
+      }
+
+      const { code, codeVerifier, redirectUri } = req.body || {};
+      const isValidCode = typeof code === "string" && code.length > 0 && code.length <= 4096;
+      const isValidVerifier = typeof codeVerifier === "string" &&
+        /^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier);
+
+      let parsedRedirect: URL | null = null;
+      try {
+        parsedRedirect = typeof redirectUri === "string" ? new URL(redirectUri) : null;
+      } catch {
+        parsedRedirect = null;
+      }
+      const redirectPort = parsedRedirect ? Number(parsedRedirect.port) : 0;
+      const isValidRedirect = parsedRedirect !== null &&
+        parsedRedirect.protocol === "http:" &&
+        parsedRedirect.hostname === "127.0.0.1" &&
+        parsedRedirect.pathname === "/oauth2/callback" &&
+        parsedRedirect.username === "" &&
+        parsedRedirect.password === "" &&
+        parsedRedirect.search === "" &&
+        parsedRedirect.hash === "" &&
+        Number.isInteger(redirectPort) &&
+        redirectPort >= 1 &&
+        redirectPort <= 65535;
+
+      if (!isValidCode || !isValidVerifier || !isValidRedirect) {
+        return res.status(400).json({ error: "oauth/invalid-request" });
+      }
+
+      try {
+        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: GOOGLE_DESKTOP_CLIENT_ID,
+            client_secret: clientSecret,
+            code,
+            code_verifier: codeVerifier,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const tokenResult = await tokenResponse.json() as Record<string, unknown>;
+        if (!tokenResponse.ok) {
+          const allowedErrors = new Set([
+            "invalid_client",
+            "invalid_grant",
+            "invalid_request",
+            "redirect_uri_mismatch",
+            "temporarily_unavailable",
+          ]);
+          const googleError = typeof tokenResult.error === "string" && allowedErrors.has(tokenResult.error)
+            ? tokenResult.error
+            : "token-exchange-failed";
+          return res.status(400).json({ error: `oauth/${googleError}` });
+        }
+
+        const idToken = tokenResult.id_token;
+        if (typeof idToken !== "string") {
+          return res.status(502).json({ error: "oauth/missing-id-token" });
+        }
+
+        let claims: Record<string, unknown>;
+        try {
+          const tokenParts = idToken.split(".");
+          if (tokenParts.length !== 3) throw new Error("Invalid token format");
+          claims = JSON.parse(Buffer.from(tokenParts[1], "base64url").toString("utf8"));
+        } catch {
+          return res.status(502).json({ error: "oauth/invalid-id-token" });
+        }
+
+        const validAudience = claims.aud === GOOGLE_DESKTOP_CLIENT_ID ||
+          (Array.isArray(claims.aud) && claims.aud.includes(GOOGLE_DESKTOP_CLIENT_ID));
+        const validIssuer = claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com";
+        const validExpiry = typeof claims.exp === "number" && claims.exp * 1000 > Date.now();
+        if (!validAudience || !validIssuer || !validExpiry) {
+          return res.status(502).json({ error: "oauth/invalid-id-token-claims" });
+        }
+
+        return res.json({
+          idToken,
+          accessToken: typeof tokenResult.access_token === "string" ? tokenResult.access_token : null,
+        });
+      } catch (error) {
+        const errorCode = error instanceof Error && error.name === "TimeoutError"
+          ? "oauth/google-timeout"
+          : "oauth/google-unavailable";
+        return res.status(502).json({ error: errorCode });
+      }
+    },
+  );
 
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
