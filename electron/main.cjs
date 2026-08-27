@@ -162,7 +162,7 @@ async function ensureServer() {
   }
 
   serverProcess = spawn(process.execPath, [serverPath], {
-    cwd: path.join(__dirname, '..'),
+    cwd: app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..'),
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
