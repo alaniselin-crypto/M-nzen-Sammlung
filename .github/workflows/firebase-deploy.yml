@@ -15,3 +15,6 @@ jobs:
           args: deploy --only firestore:rules
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          # Falls Ihr Projekt in einem Unterordner liegt (z.B. frontend), 
+          # entfernen Sie das '#' in der nächsten Zeile und tragen Sie den Ordnernamen ein:
+          # PROJECT_PATH: frontend
