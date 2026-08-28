@@ -3,6 +3,9 @@ import path from "path";
 import fs from "fs";
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { applicationDefault, getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
+import type { NextFunction, Request, Response } from "express";
 
 dotenv.config();
 
@@ -11,6 +14,55 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const GOOGLE_DESKTOP_CLIENT_ID = "211237775065-c5l25t57c5oe9bl02gkl2p93qq0mchok.apps.googleusercontent.com";
   const desktopOAuthAttempts = new Map<string, { count: number; resetAt: number }>();
+  const maxAiImageBytes = 8 * 1024 * 1024;
+  const aiAllowedOrigins = new Set([
+    "http://localhost:3000",
+    "https://localhost",
+    "https://inumis-node-backend.onrender.com",
+  ]);
+
+  function safeErrorDetails(error: unknown) {
+    const details: { name: string; code?: string } = {
+      name: error instanceof Error ? error.name : "UnknownError",
+    };
+    if (typeof error === "object" && error !== null && "code" in error) {
+      details.code = String(error.code);
+    }
+    return details;
+  }
+
+  function applyAiCors(req: Request, res: Response, next: NextFunction) {
+    const origin = req.get("origin");
+    if (origin && !aiAllowedOrigins.has(origin)) {
+      return res.status(403).json({ error: "auth/origin-not-allowed" });
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  }
+
+  async function requireFirebaseUser(req: Request, res: Response, next: NextFunction) {
+    const authorization = req.get("authorization") || "";
+    const match = authorization.match(/^Bearer ([^\s]+)$/);
+    if (!match || match[1].length > 8192) {
+      return res.status(401).json({ error: "auth/missing-token" });
+    }
+
+    try {
+      const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
+      const decodedToken = await getAdminAuth(adminApp).verifyIdToken(match[1], true);
+      res.locals.firebaseUid = decodedToken.uid;
+      next();
+    } catch (error) {
+      console.warn("Firebase ID token verification failed.", safeErrorDetails(error));
+      return res.status(401).json({ error: "auth/invalid-token" });
+    }
+  }
 
   app.post(
     "/api/oauth/google/desktop/token",
@@ -150,6 +202,8 @@ async function startServer() {
     if (trimmed.startsWith("data:image/")) {
       const matches = trimmed.match(/^data:(image\/[a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
       if (matches) {
+        const estimatedBytes = Math.ceil(matches[2].length * 3 / 4);
+        if (estimatedBytes > maxAiImageBytes) return null;
         return { mimeType: matches[1], data: matches[2] };
       }
     }
@@ -160,6 +214,8 @@ async function startServer() {
         const resp = await fetch(directUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
         if (resp.ok) {
           const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+          const contentLength = Number(resp.headers.get("content-length"));
+          if (Number.isFinite(contentLength) && contentLength > maxAiImageBytes) return null;
           // Strictly avoid HTML / JSON error pages being sent as JPEG to OpenAI
           if (contentType.includes("html") || contentType.includes("json")) {
             return null;
@@ -167,6 +223,7 @@ async function startServer() {
           const arrayBuffer = await resp.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
           if (buffer.length < 500) return null; // Too small for valid coin image
+          if (buffer.length > maxAiImageBytes) return null;
 
           let mimeType = contentType.split(";")[0].trim();
           if (!mimeType.startsWith("image/")) {
@@ -178,7 +235,7 @@ async function startServer() {
           };
         }
       } catch (err) {
-        console.error("Failed to fetch image URL for OpenAI:", trimmed, err);
+        console.error("Failed to fetch image URL for OpenAI.", safeErrorDetails(err));
       }
     }
 
@@ -186,12 +243,13 @@ async function startServer() {
   }
 
   // API Endpoint: AI Coin Title & Description Generation
-  app.post("/api/generate-coin-info", async (req, res) => {
+  app.options("/api/generate-coin-info", applyAiCors);
+  app.post("/api/generate-coin-info", applyAiCors, requireFirebaseUser, async (req, res) => {
     try {
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
-        return res.status(400).json({
-          error: "OPENAI_API_KEY ist nicht in den Umgebungsvariablen / Secrets konfiguriert."
+        return res.status(503).json({
+          error: "KI-Dienst ist serverseitig nicht konfiguriert."
         });
       }
 
@@ -271,7 +329,7 @@ Erstelle deine Antwort im folgenden JSON-Format:
         });
         responseText = response.choices[0]?.message?.content || "";
       } catch (imageErr: any) {
-        console.warn("OpenAI request with images failed, falling back to text prompt:", imageErr?.message);
+        console.warn("OpenAI request with images failed; falling back to text prompt.", safeErrorDetails(imageErr));
         // Fallback: If image input failed (e.g. invalid image format), retry text-only prompt.
         const textOnlyResponse = await openai.chat.completions.create({
           model: "gpt-4.1-mini",
@@ -304,9 +362,9 @@ Erstelle deine Antwort im folgenden JSON-Format:
         });
       }
     } catch (err: any) {
-      console.error("Error generating coin info:", err);
+      console.error("Error generating coin info.", safeErrorDetails(err));
       return res.status(500).json({
-        error: err?.message || "Fehler bei der KI-Generierung.",
+        error: "Fehler bei der KI-Generierung.",
       });
     }
   });

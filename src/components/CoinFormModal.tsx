@@ -6,6 +6,25 @@ import { formatSKU } from '../utils/storage';
 import { WORLD_COUNTRIES, POPULAR_COIN_COUNTRIES } from '../data/countries';
 import { POPULAR_CURRENCIES } from '../data/currencies';
 import { RARITY_OPTIONS } from '../data/rarities';
+import { auth } from '../lib/firebase';
+
+const AI_COIN_INFO_URL = 'https://inumis-node-backend.onrender.com/api/generate-coin-info';
+
+async function requestAiCoinInfo(payload: Record<string, unknown>) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Für die KI-Erkennung ist eine Anmeldung erforderlich.');
+  }
+  const idToken = await currentUser.getIdToken();
+  return fetch(AI_COIN_INFO_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
 
 interface CoinFormModalProps {
   isOpen: boolean;
@@ -161,13 +180,9 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
     setIsAiGenerating(true);
     setAiSuccess(null);
     try {
-      const res = await fetch('/api/generate-coin-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: formData.imageUrl,
-          reverseImageUrl: formData.reverseImageUrl
-        })
+      const res = await requestAiCoinInfo({
+        imageUrl: formData.imageUrl,
+        reverseImageUrl: formData.reverseImageUrl
       });
 
       const data = await res.json();
@@ -200,23 +215,19 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
     setIsAiNotesGenerating(true);
     setAiSuccess(null);
     try {
-      const res = await fetch('/api/generate-coin-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name,
-          country: formData.country,
-          year: formData.year,
-          faceValue: formData.faceValue,
-          currency: formData.currency,
-          itemType: formData.itemType,
-          material: formData.material,
-          mintMark: formData.mintMark,
-          condition: formData.condition,
-          notes: formData.notes,
-          imageUrl: formData.imageUrl,
-          reverseImageUrl: formData.reverseImageUrl
-        })
+      const res = await requestAiCoinInfo({
+        name: formData.name,
+        country: formData.country,
+        year: formData.year,
+        faceValue: formData.faceValue,
+        currency: formData.currency,
+        itemType: formData.itemType,
+        material: formData.material,
+        mintMark: formData.mintMark,
+        condition: formData.condition,
+        notes: formData.notes,
+        imageUrl: formData.imageUrl,
+        reverseImageUrl: formData.reverseImageUrl
       });
 
       const data = await res.json();
