@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Coin, TabType } from './types';
 import { 
   loadCoinsFromStorage, 
@@ -58,6 +59,7 @@ import { LocalStartGuideModal } from './components/LocalStartGuideModal';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { PlatformManagerModal } from './components/PlatformManagerModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
+import { ConfirmDuplicateModal } from './components/ConfirmDuplicateModal';
 import { AuthModal } from './components/AuthModal';
 import { LogoDownloadModal } from './components/LogoDownloadModal';
 import { HeroDownloadModal } from './components/HeroDownloadModal';
@@ -65,6 +67,7 @@ import { HeroDownloadModal } from './components/HeroDownloadModal';
 export default function App() {
   const { user, loading } = useAuth();
   const userUid = user?.uid ?? null;
+  const isIos = Capacitor.getPlatform() === 'ios';
 
   const [coins, setCoins] = useState<Coin[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -75,6 +78,7 @@ export default function App() {
   const [detailCoin, setDetailCoin] = useState<Coin | null>(null);
   const [editCoin, setEditCoin] = useState<Coin | null>(null);
   const [coinToDelete, setCoinToDelete] = useState<Coin | null>(null);
+  const [coinToDuplicate, setCoinToDuplicate] = useState<Coin | null>(null);
   const [isFormModalOpen, setIsFormModalOpen] = useState<boolean>(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState<boolean>(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState<boolean>(false);
@@ -821,6 +825,14 @@ export default function App() {
     }
   };
 
+  const handleDuplicateRequest = (sourceCoin: Coin) => {
+    if (isIos) {
+      setCoinToDuplicate(sourceCoin);
+      return;
+    }
+    void handleDuplicateCoin(sourceCoin);
+  };
+
   // Delete Handler
   const handleDeleteCoin = (coinId: string) => {
     const found = coins.find(c => c.id === coinId);
@@ -1039,7 +1051,7 @@ export default function App() {
             }}
             onDelete={handleDeleteCoin}
             onToggleFavorite={handleToggleFavorite}
-            onDuplicate={handleDuplicateCoin}
+            onDuplicate={handleDuplicateRequest}
             onOpenFolderManager={() => setIsFolderManagerOpen(true)}
             onOpenPlatformManager={() => setIsPlatformManagerOpen(true)}
           />
@@ -1110,7 +1122,7 @@ export default function App() {
         }}
         onDelete={handleDeleteCoin}
         onToggleFavorite={handleToggleFavorite}
-        onDuplicate={handleDuplicateCoin}
+        onDuplicate={handleDuplicateRequest}
       />
 
       <CoinFormModal
@@ -1159,6 +1171,18 @@ export default function App() {
         onClose={() => setCoinToDelete(null)}
         onConfirm={handleConfirmDeleteCoin}
       />
+
+      {isIos && (
+        <ConfirmDuplicateModal
+          isOpen={coinToDuplicate !== null}
+          onClose={() => setCoinToDuplicate(null)}
+          onConfirm={() => {
+            const sourceCoin = coinToDuplicate;
+            setCoinToDuplicate(null);
+            if (sourceCoin) void handleDuplicateCoin(sourceCoin);
+          }}
+        />
+      )}
 
       <LogoDownloadModal
         isOpen={isLogoModalOpen}

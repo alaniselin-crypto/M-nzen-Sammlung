@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Star, Eye, Edit2, Trash2, TrendingUp, TrendingDown, MapPin, Calendar, Scale, Sparkles, RefreshCw, Copy, Folder, Hash, ShoppingBag, Tag, CheckCircle2, Banknote, Coins, Layers, Crown } from 'lucide-react';
 import { Coin } from '../types';
 import { CoinAvatar } from './CoinAvatar';
@@ -35,6 +36,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
   const rarityOpt = getRarityOption(coin.rarity);
   const isBanknote = coin.itemType === 'banknote' || (!coin.itemType && /\b(banknote|banknoten|geldschein|geldscheine|papiergeld)\b/i.test(coin.name + ' ' + (coin.material || '') + ' ' + (coin.notes || '')));
   const quantity = coin.quantity || 1;
+  const isIos = Capacitor.getPlatform() === 'ios';
 
   // Placeholder fallback styling based on material
   const getMaterialGradient = (material?: string) => {
@@ -165,10 +167,11 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             {onDuplicate && (
               <button
                 onClick={() => onDuplicate(coin)}
-                className="p-1.5 rounded hover:bg-[#3d2e26] text-stone-400 hover:text-amber-300 transition-colors"
+                className={`${isIos ? 'flex items-center gap-1.5 px-2.5' : 'p-1.5'} rounded hover:bg-[#3d2e26] text-stone-400 hover:text-amber-300 transition-colors`}
                 title="Münze duplizieren / kopieren"
               >
                 <Copy className="w-4 h-4 text-amber-400" />
+                {isIos && <span className="text-xs font-semibold">Duplizieren</span>}
               </button>
             )}
             <button
@@ -202,10 +205,11 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             {onDuplicate && (
               <button
                 onClick={() => onDuplicate(coin)}
-                className="p-1.5 rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-300 transition-all"
+                className={`${isIos ? 'flex items-center gap-1.5 px-2.5 py-1.5' : 'p-1.5'} rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-300 transition-all`}
                 title="Münze duplizieren / kopieren"
               >
                 <Copy className="w-4 h-4" />
+                {isIos && <span className="text-xs font-semibold">Duplizieren</span>}
               </button>
             )}
             <button
@@ -383,7 +387,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
               title="Kopieren / Duplizieren"
             >
               <Copy className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Kopie</span>
+              {isIos ? <span className="text-[10px]">Duplizieren</span> : <span className="hidden sm:inline">Kopie</span>}
             </button>
           )}
           <button
