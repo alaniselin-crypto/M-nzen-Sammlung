@@ -118,7 +118,7 @@ async function authenticateWithGoogleInSystemBrowser() {
         codeVerifier,
         redirectUri,
       }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(90_000),
     });
 
     const tokenResult = await tokenResponse.json();
