@@ -1,4 +1,8 @@
 import { Coin } from '../types';
+import {
+  ensureLocalCatalogNumberCounter,
+  reserveNextLocalCatalogNumber,
+} from './catalogNumberCounter';
 
 const STORAGE_KEY = 'coin_collection_tracker_data_v1';
 const FOLDERS_STORAGE_KEY = 'coin_collection_custom_folders_v1';
@@ -9,6 +13,7 @@ const USER_FOLDERS_STORAGE_KEY = 'coin_collection_custom_folders_v2';
 const USER_PLATFORMS_STORAGE_KEY = 'coin_collection_custom_platforms_v2';
 const USER_TOMBSTONES_STORAGE_KEY = 'coin_collection_tombstones_v1';
 const USER_PENDING_MUTATIONS_STORAGE_KEY = 'coin_collection_pending_mutations_v1';
+const LAST_ISSUED_CATALOG_NUMBER_STORAGE_KEY = 'coin_collection_last_issued_catalog_number_v1';
 
 export interface LocalCoinTombstone {
   coinId: string;
@@ -111,6 +116,22 @@ export function loadUserCoinsFromStorage(uid: string): Coin[] {
 
 export function saveUserCoinsToStorage(uid: string, coins: Coin[]): void {
   writeUserArray(USER_COINS_STORAGE_KEY, uid, coins);
+}
+
+export function reserveNextCatalogNumberInLocalStorage(coins: Coin[], uid = 'guest'): string {
+  return reserveNextLocalCatalogNumber(
+    localStorage,
+    getUserStorageKey(LAST_ISSUED_CATALOG_NUMBER_STORAGE_KEY, uid),
+    coins,
+  );
+}
+
+export function ensureCatalogNumberCounterInLocalStorage(coins: Coin[], uid = 'guest'): number {
+  return ensureLocalCatalogNumberCounter(
+    localStorage,
+    getUserStorageKey(LAST_ISSUED_CATALOG_NUMBER_STORAGE_KEY, uid),
+    coins,
+  );
 }
 
 export function loadUserFoldersFromStorage(uid: string): string[] {
@@ -416,41 +437,14 @@ export function generateNextCatalogNumber(coins: Coin[], numDigits: number = 5):
 export function loadCoinsFromStorage(): Coin[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    let coins: Coin[] = INITIAL_SAMPLE_COINS;
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        coins = parsed;
+        return parsed;
       }
     }
-
-    // Ensure every coin has a 5-digit catalogNumber
-    let highestNum = 0;
-    coins.forEach(c => {
-      if (c.catalogNumber) {
-        const num = parseInt(c.catalogNumber, 10);
-        if (!isNaN(num) && num > highestNum) highestNum = num;
-      }
-    });
-
-    let modified = false;
-    const fixedCoins = coins.map(c => {
-      if (!c.catalogNumber) {
-        highestNum++;
-        modified = true;
-        return {
-          ...c,
-          catalogNumber: highestNum.toString().padStart(5, '0')
-        };
-      }
-      return c;
-    });
-
-    if (modified || raw === null) {
-      saveCoinsToStorage(fixedCoins);
-    }
-
-    return fixedCoins;
+    saveCoinsToStorage(INITIAL_SAMPLE_COINS);
+    return INITIAL_SAMPLE_COINS;
   } catch (error) {
     console.error('Failed to load coin collection from localStorage:', error);
     return [];

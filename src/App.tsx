@@ -5,7 +5,6 @@ import {
   saveCoinsToStorage, 
   resetCoinsToSampleData, 
   INITIAL_SAMPLE_COINS,
-  generateNextCatalogNumber,
   loadCustomFolders,
   saveCustomFolders,
   renameFolderInCoinsAndStorage,
@@ -30,15 +29,20 @@ import {
   markUserCoinDeletionPending,
   removeUserPendingMutation,
   recordUserPendingMutationFailure,
-  isPendingMutationPayloadValid
+  isPendingMutationPayloadValid,
+  ensureCatalogNumberCounterInLocalStorage,
+  reserveNextCatalogNumberInLocalStorage
 } from './utils/storage';
 import { parseImageSideAndBaseName } from './utils/csv';
+import { parseCatalogNumber } from './utils/catalogNumberCounter';
 import {
   fetchUserCoinSyncSnapshot,
   fetchUserSettings,
   saveCoinToFirestore, 
   deleteCoinFromFirestore, 
-  saveUserSettingsToFirestore
+  saveUserSettingsToFirestore,
+  ensureCatalogNumberCounterForUser,
+  reserveNextCatalogNumberForUser
 } from './utils/firestoreStorage';
 import { useAuth } from './context/AuthContext';
 
@@ -82,35 +86,42 @@ export default function App() {
   const [isFetchingWebhooks, setIsFetchingWebhooks] = useState<boolean>(false);
   const webhookImportRunningRef = useRef(false);
 
-  // Helper to ensure catalogNumber / SKU is populated (5-digit auto-counter)
+  // Preserve existing inventory numbers while normalizing display names.
   const ensureCoinSKUs = (rawCoins: Coin[]): Coin[] => {
-    let maxSKU = 0;
-
-    // First pass: find highest existing SKU integer from catalogNumber
-    rawCoins.forEach(c => {
-      const s = formatSKU(c.catalogNumber);
-      if (s && /^\d+$/.test(s)) {
-        const num = parseInt(s, 10);
-        if (!isNaN(num) && num > maxSKU) {
-          maxSKU = num;
-        }
-      }
-    });
-
-    // Second pass: assign clean 5-digit SKUs sequentially if missing
     return rawCoins.map(c => {
-      let sku = formatSKU(c.catalogNumber);
-      if (!sku || !/^\d+$/.test(sku)) {
-        maxSKU++;
-        sku = String(maxSKU).padStart(5, '0');
-      }
-
       const cleanName = getCoinTitle(c);
-      if (sku !== c.catalogNumber || cleanName !== c.name) {
-        return { ...c, catalogNumber: sku, name: cleanName };
+      if (cleanName !== c.name) {
+        return { ...c, name: cleanName };
       }
       return c;
     });
+  };
+
+  const reserveCatalogNumber = async (knownCoins: Coin[]): Promise<string> => {
+    return userUid
+      ? reserveNextCatalogNumberForUser(userUid, knownCoins)
+      : reserveNextCatalogNumberInLocalStorage(knownCoins);
+  };
+
+  const preserveIssuedCatalogNumbers = async (knownCoins: Coin[]): Promise<void> => {
+    if (userUid) {
+      await ensureCatalogNumberCounterForUser(userUid, knownCoins);
+    } else {
+      ensureCatalogNumberCounterInLocalStorage(knownCoins);
+    }
+  };
+
+  const assignMissingCatalogNumbers = async (newCoins: Coin[], existingCoins: Coin[]): Promise<Coin[]> => {
+    const numberedCoins: Coin[] = [];
+    for (const coin of newCoins) {
+      if (parseCatalogNumber(coin.catalogNumber) !== null) {
+        numberedCoins.push(coin);
+        continue;
+      }
+      const catalogNumber = await reserveCatalogNumber([...existingCoins, ...newCoins, ...numberedCoins]);
+      numberedCoins.push({ ...coin, catalogNumber });
+    }
+    return numberedCoins;
   };
 
   const persistCoinForUser = async (uid: string, coin: Coin): Promise<void> => {
@@ -200,6 +211,9 @@ export default function App() {
             fetchUserCoinSyncSnapshot(userUid),
             fetchUserSettings(userUid),
           ]);
+          if (cancelled) return;
+
+          await ensureCatalogNumberCounterForUser(userUid, [...snapshot.coins, ...localCoins]);
           if (cancelled) return;
 
           const cloudTombstoneIds = new Set(snapshot.tombstones.map(tombstone => tombstone.coinId));
@@ -323,7 +337,7 @@ export default function App() {
           const addedFolders = new Set<string>();
           const updated = [...loadUserCoinsFromStorage(userUid)];
 
-          newWebhookCoins.forEach((newCoin) => {
+          for (const newCoin of newWebhookCoins) {
               if (newCoin.storageLocation) {
                 addedFolders.add(newCoin.storageLocation);
               }
@@ -381,8 +395,12 @@ export default function App() {
                 coinsToSave.push(mergedCoin);
               } else {
                 // Fresh coin - keep front and reverse distinct
+                const catalogNumber = parseCatalogNumber(newCoin.catalogNumber) !== null
+                  ? newCoin.catalogNumber
+                  : await reserveCatalogNumber([...updated, ...newWebhookCoins]);
                 const freshCoin: Coin = {
                   ...newCoin,
+                  catalogNumber,
                   rawBaseName: cleanBaseName,
                   imageUrl: newCoin.imageUrl || '',
                   reverseImageUrl: (newCoin.reverseImageUrl && newCoin.reverseImageUrl !== newCoin.imageUrl) ? newCoin.reverseImageUrl : ''
@@ -390,7 +408,7 @@ export default function App() {
                 updated.unshift(freshCoin);
                 coinsToSave.push(freshCoin);
               }
-          });
+          }
 
           const processedUpdated = ensureCoinSKUs(updated);
           saveUserCoinsToStorage(userUid, processedUpdated);
@@ -740,7 +758,7 @@ export default function App() {
         ...(targetCoin || {}),
         ...coinData,
         id: coinData.id,
-        catalogNumber: coinData.catalogNumber?.trim() || targetCoin?.catalogNumber || generateNextCatalogNumber(coins, 5),
+        catalogNumber: targetCoin ? targetCoin.catalogNumber : (coinData.catalogNumber?.trim() || ''),
         updatedAt: now
       } as Coin;
 
@@ -756,10 +774,11 @@ export default function App() {
       }
     } else {
       // Add new
+      const catalogNumber = await reserveCatalogNumber(coins);
       const newCoin: Coin = {
         ...coinData,
         id: `coin-${Date.now()}`,
-        catalogNumber: coinData.catalogNumber?.trim() || generateNextCatalogNumber(coins, 5),
+        catalogNumber,
         createdAt: now,
         updatedAt: now
       };
@@ -782,7 +801,7 @@ export default function App() {
   // Duplicate Coin Handler
   const handleDuplicateCoin = async (sourceCoin: Coin) => {
     const now = new Date().toISOString();
-    const nextNum = generateNextCatalogNumber(coins);
+    const nextNum = await reserveCatalogNumber(coins);
     const duplicatedCoin: Coin = {
       ...sourceCoin,
       id: `coin-${Date.now()}`,
@@ -814,6 +833,7 @@ export default function App() {
     if (!coinToDelete) return;
     const targetId = coinToDelete.id;
 
+    await preserveIssuedCatalogNumbers(coins);
     const updatedList = coins.filter(c => c.id !== targetId);
     updateCoinsState(updatedList);
 
@@ -855,9 +875,11 @@ export default function App() {
 
   // CSV Import Handler
   const handleImportCoins = async (newCoins: Coin[], replaceExisting: boolean) => {
+    if (replaceExisting) await preserveIssuedCatalogNumbers(coins);
+    const numberedNewCoins = await assignMissingCatalogNumbers(newCoins, replaceExisting ? [] : coins);
     if (userUid) {
       if (replaceExisting) {
-        const importedIds = new Set(newCoins.map(coin => coin.id));
+        const importedIds = new Set(numberedNewCoins.map(coin => coin.id));
         for (const coin of coins) {
           if (!importedIds.has(coin.id)) {
             try {
@@ -869,7 +891,7 @@ export default function App() {
         }
       }
       const existingIds = new Set(replaceExisting ? [] : coins.map(coin => coin.id));
-      const importedCoins = newCoins.map(coin => existingIds.has(coin.id)
+      const importedCoins = numberedNewCoins.map(coin => existingIds.has(coin.id)
         ? { ...coin, id: `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` }
         : coin
       );
@@ -884,11 +906,11 @@ export default function App() {
       }
     } else {
       if (replaceExisting) {
-        updateCoinsState(newCoins);
+        updateCoinsState(numberedNewCoins);
       } else {
         const existingIds = new Set(coins.map(c => c.id));
         const merged = [...coins];
-        newCoins.forEach(nc => {
+        numberedNewCoins.forEach(nc => {
           if (!existingIds.has(nc.id)) {
             merged.push(nc);
           } else {
@@ -902,6 +924,7 @@ export default function App() {
 
   // Reset Data Handler
   const handleResetToSampleData = async () => {
+    await preserveIssuedCatalogNumbers(coins);
     const resetIdPrefix = `sample-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const resetList = userUid
       ? INITIAL_SAMPLE_COINS.map((coin, index) => ({
@@ -934,6 +957,7 @@ export default function App() {
 
   // Clear All Coins Handler
   const handleClearAllCoins = async () => {
+    await preserveIssuedCatalogNumbers(coins);
     updateCoinsState([]);
     if (userUid) {
       for (const coin of coins) {
@@ -1097,7 +1121,7 @@ export default function App() {
         }}
         onSave={handleSaveCoin}
         initialCoin={editCoin}
-        nextCatalogNumber={generateNextCatalogNumber(coins, 5)}
+        nextCatalogNumber=""
         availableFolders={folders}
         onOpenFolderManager={() => setIsFolderManagerOpen(true)}
         availablePlatforms={platforms}

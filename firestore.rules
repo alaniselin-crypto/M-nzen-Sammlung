@@ -18,10 +18,17 @@ service cloud.firestore {
         && request.resource.data.deletedAt is timestamp;
     }
 
-    function isValidAppSettings() {
-      return request.resource.data.keys().hasOnly(['folders', 'platforms'])
+    function isValidAppSettings(uid) {
+      return request.resource.data.keys().hasOnly(['folders', 'platforms', 'lastIssuedCatalogNumber'])
         && (!('folders' in request.resource.data) || request.resource.data.folders is list)
-        && (!('platforms' in request.resource.data) || request.resource.data.platforms is list);
+        && (!('platforms' in request.resource.data) || request.resource.data.platforms is list)
+        && (!('lastIssuedCatalogNumber' in request.resource.data)
+          || (request.resource.data.lastIssuedCatalogNumber is int
+            && request.resource.data.lastIssuedCatalogNumber >= 0))
+        && (!exists(/databases/$(database)/documents/users/$(uid)/settings/app)
+          || !('lastIssuedCatalogNumber' in resource.data)
+          || (('lastIssuedCatalogNumber' in request.resource.data)
+            && request.resource.data.lastIssuedCatalogNumber >= resource.data.lastIssuedCatalogNumber));
     }
 
     match /users/{uid}/coins/{coinId} {
@@ -36,10 +43,11 @@ service cloud.firestore {
     }
 
     match /users/{uid}/settings/{settingsId} {
-      allow read, delete: if isOwner(uid) && settingsId == 'app';
+      allow read: if isOwner(uid) && settingsId == 'app';
+      allow delete: if false;
       allow create, update: if isOwner(uid)
         && settingsId == 'app'
-        && isValidAppSettings();
+        && isValidAppSettings(uid);
     }
 
     match /coins/{coinId} {

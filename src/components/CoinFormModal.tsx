@@ -37,7 +37,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
   onOpenPlatformManager
 }) => {
   const [formData, setFormData] = useState({
-    catalogNumber: initialCoin?.catalogNumber || nextCatalogNumber || '00001',
+    catalogNumber: initialCoin?.catalogNumber || nextCatalogNumber || '',
     itemType: (initialCoin?.itemType || 'coin') as 'coin' | 'banknote',
     quantity: initialCoin?.quantity || 1,
     rarity: initialCoin?.rarity || 'A - Häufig',
@@ -76,7 +76,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
   useEffect(() => {
     if (initialCoin) {
       setFormData({
-        catalogNumber: formatSKU(initialCoin.catalogNumber) || '00001',
+        catalogNumber: initialCoin.catalogNumber || '',
         itemType: initialCoin.itemType || 'coin',
         quantity: initialCoin.quantity || 1,
         rarity: initialCoin.rarity || 'A - Häufig',
@@ -110,7 +110,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
       });
     } else {
       setFormData({
-        catalogNumber: formatSKU(nextCatalogNumber) || '00001',
+        catalogNumber: nextCatalogNumber ? formatSKU(nextCatalogNumber) : '',
         itemType: 'coin',
         quantity: 1,
         rarity: 'A - Häufig',
@@ -400,7 +400,7 @@ export const CoinFormModal: React.FC<CoinFormModalProps> = ({
                     <input
                       type="text"
                       readOnly
-                      value={formData.catalogNumber}
+                      value={formData.catalogNumber || (initialCoin ? 'Keine Inventarnummer' : 'Vergabe beim Speichern')}
                       className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950/80 border border-amber-500/60 text-amber-300 font-mono font-bold text-base shadow-inner cursor-not-allowed focus:outline-none"
                     />
                     <Lock className="w-3.5 h-3.5 text-amber-400 absolute right-3 top-1/2 -translate-y-1/2 opacity-70" />

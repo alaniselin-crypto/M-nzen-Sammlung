@@ -10,6 +10,10 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Coin } from '../types';
+import {
+  formatCatalogNumber,
+  getHighestCatalogNumber,
+} from './catalogNumberCounter';
 
 const USERS_COLLECTION = 'users';
 const COINS_COLLECTION = 'coins';
@@ -53,6 +57,7 @@ export interface CoinSyncSnapshot {
 export interface UserAppSettings {
   folders?: string[];
   platforms?: string[];
+  lastIssuedCatalogNumber?: number;
 }
 
 export interface SyncResult {
@@ -186,9 +191,58 @@ export async function fetchUserSettings(uid: string): Promise<UserAppSettings> {
     return {
       folders: Array.isArray(data.folders) ? data.folders.filter((value): value is string => typeof value === 'string') : undefined,
       platforms: Array.isArray(data.platforms) ? data.platforms.filter((value): value is string => typeof value === 'string') : undefined,
+      lastIssuedCatalogNumber: Number.isSafeInteger(data.lastIssuedCatalogNumber) && data.lastIssuedCatalogNumber >= 0
+        ? data.lastIssuedCatalogNumber
+        : undefined,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `${userPath(validUid)}/${SETTINGS_COLLECTION}/${SETTINGS_DOCUMENT}`);
+  }
+}
+
+export async function ensureCatalogNumberCounterForUser(uid: string, knownCoins: Coin[]): Promise<number> {
+  const validUid = requireUid(uid);
+  const settingsPath = `${userPath(validUid)}/${SETTINGS_COLLECTION}/${SETTINGS_DOCUMENT}`;
+  try {
+    const observedHighest = getHighestCatalogNumber(knownCoins);
+    return await runTransaction(db, async transaction => {
+      const settingsRef = userSettingsDocument(validUid);
+      const settings = await transaction.get(settingsRef);
+      const storedValue = settings.data()?.lastIssuedCatalogNumber;
+      const lastIssued = Number.isSafeInteger(storedValue) && storedValue >= 0 ? storedValue : 0;
+      const initializedValue = Math.max(lastIssued, observedHighest);
+
+      transaction.set(settingsRef, { lastIssuedCatalogNumber: initializedValue }, { merge: true });
+      return initializedValue;
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, settingsPath);
+  }
+}
+
+export async function reserveNextCatalogNumberForUser(uid: string, knownCoins: Coin[]): Promise<string> {
+  const validUid = requireUid(uid);
+  const settingsPath = `${userPath(validUid)}/${SETTINGS_COLLECTION}/${SETTINGS_DOCUMENT}`;
+  try {
+    const cloudSnapshot = await getDocs(userCoinsCollection(validUid));
+    const cloudCoins = cloudSnapshot.docs.map(document => document.data() as Coin);
+    const observedHighest = Math.max(
+      getHighestCatalogNumber(knownCoins),
+      getHighestCatalogNumber(cloudCoins),
+    );
+
+    return await runTransaction(db, async transaction => {
+      const settingsRef = userSettingsDocument(validUid);
+      const settings = await transaction.get(settingsRef);
+      const storedValue = settings.data()?.lastIssuedCatalogNumber;
+      const lastIssued = Number.isSafeInteger(storedValue) && storedValue >= 0 ? storedValue : 0;
+      const nextValue = Math.max(lastIssued, observedHighest) + 1;
+
+      transaction.set(settingsRef, { lastIssuedCatalogNumber: nextValue }, { merge: true });
+      return formatCatalogNumber(nextValue);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, settingsPath);
   }
 }
 
@@ -275,6 +329,8 @@ export async function clearAllCoinsFromFirestore(uid: string): Promise<void> {
   const validUid = requireUid(uid);
   try {
     const snapshot = await getDocs(userCoinsCollection(validUid));
+    const cloudCoins = snapshot.docs.map(document => document.data() as Coin);
+    await ensureCatalogNumberCounterForUser(validUid, cloudCoins);
     for (let index = 0; index < snapshot.docs.length; index += 225) {
       const batch = writeBatch(db);
       snapshot.docs.slice(index, index + 225).forEach(document => {
