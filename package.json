@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.inumis.app",
-    "productName": "inumis.app - Münzsammlung Manager",
+    "productName": "inumis.app - Muenzsammlung Manager",
     "directories": {
       "output": "release"
     },
