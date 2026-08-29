@@ -100,6 +100,10 @@ function userPath(uid: string): string {
   return `${USERS_COLLECTION}/${requireUid(uid)}`;
 }
 
+function userDocument(uid: string) {
+  return doc(db, USERS_COLLECTION, requireUid(uid));
+}
+
 function userCoinsCollection(uid: string) {
   return collection(db, USERS_COLLECTION, requireUid(uid), COINS_COLLECTION);
 }
@@ -341,6 +345,30 @@ export async function clearAllCoinsFromFirestore(uid: string): Promise<void> {
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `${userPath(validUid)}/${COINS_COLLECTION}`);
+  }
+}
+
+export async function deleteAllUserDataFromFirestore(uid: string): Promise<void> {
+  const validUid = requireUid(uid);
+  try {
+    const [coinSnapshot, tombstoneSnapshot] = await Promise.all([
+      getDocs(userCoinsCollection(validUid)),
+      getDocs(userTombstonesCollection(validUid)),
+    ]);
+    const references = [
+      ...coinSnapshot.docs.map(document => document.ref),
+      ...tombstoneSnapshot.docs.map(document => document.ref),
+      userSettingsDocument(validUid),
+      userDocument(validUid),
+    ];
+
+    for (let index = 0; index < references.length; index += 450) {
+      const batch = writeBatch(db);
+      references.slice(index, index + 450).forEach(reference => batch.delete(reference));
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, userPath(validUid));
   }
 }
 

@@ -3,6 +3,10 @@ import {
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithCredential,
@@ -12,11 +16,13 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, googleProvider } from '../lib/firebase';
+import { deleteAllUserDataFromFirestore } from '../utils/firestoreStorage';
 
 export interface AppUser {
   uid: string;
   email: string | null;
   displayName?: string | null;
+  providerIds: string[];
 }
 
 interface AuthContextType {
@@ -27,6 +33,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: (password?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,7 +48,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser({
           uid: currentUser.uid,
           email: currentUser.email,
-          displayName: currentUser.displayName
+          displayName: currentUser.displayName,
+          providerIds: currentUser.providerData.map(provider => provider.providerId),
         });
       } else {
         setUser(null);
@@ -99,6 +107,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signOut(auth);
   };
 
+  const deleteAccount = async (password?: string) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('auth/no-current-user');
+
+    const providerIds = currentUser.providerData.map(provider => provider.providerId);
+    if (providerIds.includes('password')) {
+      if (!currentUser.email || !password) throw new Error('auth/password-required');
+      const credential = EmailAuthProvider.credential(currentUser.email, password);
+      await reauthenticateWithCredential(currentUser, credential);
+    } else if (providerIds.includes('google.com')) {
+      if (Capacitor.isNativePlatform()) {
+        const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+        const idToken = result.credential?.idToken ?? null;
+        const accessToken = result.credential?.accessToken ?? null;
+        if (!idToken) throw new Error('auth/missing-google-token');
+        await reauthenticateWithCredential(currentUser, GoogleAuthProvider.credential(idToken, accessToken));
+      } else {
+        await reauthenticateWithPopup(currentUser, googleProvider);
+      }
+    } else {
+      throw new Error('auth/unsupported-provider');
+    }
+
+    await deleteAllUserDataFromFirestore(currentUser.uid);
+    await deleteUser(currentUser);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await FirebaseAuthentication.signOut();
+      } catch (error) {
+        console.warn('Native Firebase session cleanup failed after account deletion:', error);
+      }
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -109,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetPassword,
         loginWithGoogle,
         logout,
+        deleteAccount,
       }}
     >
       {children}

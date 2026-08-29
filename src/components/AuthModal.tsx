@@ -15,7 +15,8 @@ import {
   Globe,
   Eye,
   EyeOff,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -32,7 +33,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSyncLocalData,
   hasLocalCoinsCount = 0
 }) => {
-  const { user, loginWithEmail, registerWithEmail, resetPassword, loginWithGoogle, logout } = useAuth();
+  const { user, loginWithEmail, registerWithEmail, resetPassword, loginWithGoogle, logout, deleteAccount } = useAuth();
   
   const [isRegisterMode, setIsRegisterMode] = useState<boolean>(true);
   const [email, setEmail] = useState<string>('');
@@ -45,6 +46,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [canAutoRegister, setCanAutoRegister] = useState<boolean>(false);
   const [canAutoLogin, setCanAutoLogin] = useState<boolean>(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string>('');
+  const [deletePassword, setDeletePassword] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -217,6 +221,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  const handleDeleteAccount = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsLoading(true);
+    try {
+      await deleteAccount(deletePassword || undefined);
+      setShowDeleteConfirmation(false);
+      setDeleteConfirmation('');
+      setDeletePassword('');
+      setSuccessMsg('Ihr Konto und alle zugehörigen Cloud-Daten wurden dauerhaft gelöscht.');
+      setTimeout(() => onClose(), 1600);
+    } catch (err: any) {
+      const code = typeof err?.code === 'string' ? err.code : err?.message;
+      if (code === 'auth/password-required') {
+        setErrorMsg('Bitte geben Sie zur Bestätigung Ihr aktuelles Passwort ein.');
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setErrorMsg('Die erneute Anmeldung ist fehlgeschlagen. Bitte prüfen Sie Ihr Passwort und versuchen Sie es erneut.');
+      } else if (code === 'auth/requires-recent-login') {
+        setErrorMsg('Aus Sicherheitsgründen ist eine erneute Anmeldung erforderlich. Bitte melden Sie sich ab, wieder an und versuchen Sie die Kontolöschung erneut.');
+      } else if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setErrorMsg('Die erneute Anmeldung wurde abgebrochen. Ihr Konto wurde nicht gelöscht.');
+      } else {
+        setErrorMsg('Das Konto konnte nicht vollständig gelöscht werden. Bitte versuchen Sie es erneut.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-[#181a22] border border-amber-500/30 rounded-2xl w-full max-w-md max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] shadow-2xl overflow-hidden flex flex-col text-slate-100">
@@ -280,6 +313,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               )}
 
+              {errorMsg && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
               <button
                 onClick={handleLogout}
                 disabled={isLoading}
@@ -288,6 +328,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <LogOut className="w-4 h-4" />
                 <span>Abmelden</span>
               </button>
+
+              {!showDeleteConfirmation ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMsg('');
+                    setShowDeleteConfirmation(true);
+                  }}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-4 rounded-xl bg-rose-950/40 hover:bg-rose-950/60 text-rose-300 border border-rose-800/60 text-xs font-bold flex items-center justify-center space-x-2 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Konto löschen</span>
+                </button>
+              ) : (
+                <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-700/60 space-y-3">
+                  <div className="text-xs text-rose-200 leading-relaxed">
+                    <strong>Diese Aktion ist endgültig.</strong> Ihr Benutzerkonto sowie alle Münzen, Banknoten, Einstellungen und Synchronisationsdaten in der Cloud werden dauerhaft gelöscht. Geben Sie zur Bestätigung <strong>LÖSCHEN</strong> ein.
+                  </div>
+                  <input
+                    type="text"
+                    value={deleteConfirmation}
+                    onChange={(event) => setDeleteConfirmation(event.target.value)}
+                    placeholder="LÖSCHEN"
+                    autoComplete="off"
+                    className="w-full px-3 py-2.5 bg-slate-950 border border-rose-800/70 rounded-xl text-base sm:text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                  />
+                  {user.providerIds.includes('password') && (
+                    <input
+                      type="password"
+                      value={deletePassword}
+                      onChange={(event) => setDeletePassword(event.target.value)}
+                      placeholder="Aktuelles Passwort"
+                      autoComplete="current-password"
+                      className="w-full px-3 py-2.5 bg-slate-950 border border-rose-800/70 rounded-xl text-base sm:text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                    />
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeleteConfirmation(false);
+                        setDeleteConfirmation('');
+                        setDeletePassword('');
+                      }}
+                      disabled={isLoading}
+                      className="py-2.5 px-3 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold"
+                    >
+                      Abbrechen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteAccount}
+                      disabled={isLoading || deleteConfirmation !== 'LÖSCHEN' || (user.providerIds.includes('password') && !deletePassword)}
+                      className="py-2.5 px-3 rounded-xl bg-rose-600 disabled:bg-rose-950 disabled:text-rose-500 text-white border border-rose-500 text-xs font-bold"
+                    >
+                      Endgültig löschen
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             /* Login / Register Form */
