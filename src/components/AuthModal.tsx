@@ -599,7 +599,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-slate-800 bg-[#121318] text-center text-[11px] text-slate-500">
-          inumis.app Cloud-Sync • Gesichert via Google Firebase Firestore
+          <div>inumis.app Cloud-Sync • Gesichert via Google Firebase Firestore</div>
+          <a
+            href="https://inumis.app/datenschutzerklarung/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block mt-1 text-amber-400 hover:text-amber-300 underline transition-colors"
+          >
+            Datenschutzerklärung
+          </a>
         </div>
 
       </div>
