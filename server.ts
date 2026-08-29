@@ -18,6 +18,7 @@ async function startServer() {
   const aiAllowedOrigins = new Set([
     "http://localhost:3000",
     "https://localhost",
+    "capacitor://localhost",
     "https://inumis-node-backend.onrender.com",
   ]);
 
