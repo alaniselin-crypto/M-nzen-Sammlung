@@ -27,7 +27,8 @@ export const CoinCard: React.FC<CoinCardProps> = ({
 }) => {
   const [showReverse, setShowReverse] = useState(false);
   const cond = getConditionLabel(coin.condition);
-  const profit = coin.currentValue - coin.purchasePrice;
+  const hasCurrentValue = typeof coin.currentValue === 'number' && Number.isFinite(coin.currentValue);
+  const profit = (coin.currentValue ?? 0) - coin.purchasePrice;
   const profitMargin = coin.purchasePrice > 0 ? (profit / coin.purchasePrice) * 100 : 0;
   const isPositive = profit >= 0;
 
@@ -76,7 +77,8 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="sm"
-                className={isBanknote ? '!object-contain !object-center' : '!aspect-square !rounded-full !object-contain !object-center'}
+                containImage={!isBanknote}
+                className={isBanknote ? '!object-cover !object-center' : '!aspect-square !rounded-full'}
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
@@ -143,10 +145,12 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           {formatCurrency(coin.currentValue)}
         </td>
         <td className="py-3 px-3 font-mono">
-          <span className={`inline-flex items-center gap-1 text-xs font-semibold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-            {isPositive ? '+' : ''}{profitMargin.toFixed(1)}%
-          </span>
+          {hasCurrentValue ? (
+            <span className={`inline-flex items-center gap-1 text-xs font-semibold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {isPositive ? '+' : ''}{profitMargin.toFixed(1)}%
+            </span>
+          ) : <span className="text-stone-500">—</span>}
         </td>
         <td className="py-3 px-3 text-right">
           <div className="flex items-center justify-end gap-1">
@@ -188,11 +192,11 @@ export const CoinCard: React.FC<CoinCardProps> = ({
   }
 
   return (
-    <div className="group relative bg-gradient-to-b from-[#271e19] to-[#1e1713] hover:from-[#2e231d] hover:to-[#221a15] border border-[#3e2e25] hover:border-amber-500/50 rounded-2xl p-4 transition-all duration-300 shadow-md hover:shadow-xl hover:shadow-amber-950/40 flex flex-col justify-between">
+    <div className="group relative w-full min-w-0 max-w-full overflow-hidden bg-gradient-to-b from-[#271e19] to-[#1e1713] hover:from-[#2e231d] hover:to-[#221a15] border border-[#3e2e25] hover:border-amber-500/50 rounded-2xl px-3 py-2 sm:p-4 transition-all duration-300 shadow-md hover:shadow-xl hover:shadow-amber-950/40 flex flex-col justify-between">
         {/* Top Banner & Action */}
       <div>
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-2 sm:mb-3 sm:flex-nowrap sm:items-center">
+          <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
             <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[11px] font-bold" title="Münznummer / SKU">
               #{formatSKU(coin.catalogNumber || coin.id || '1')}
             </span>
@@ -201,11 +205,11 @@ export const CoinCard: React.FC<CoinCardProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             {onDuplicate && (
               <button
                 onClick={() => onDuplicate(coin)}
-                className={`${isIos ? 'flex items-center gap-1.5 px-2.5 py-1.5' : 'p-1.5'} rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-300 transition-all`}
+                className={`${isIos ? 'flex items-center gap-1.5 px-2.5 py-1 sm:py-1.5' : 'p-1.5'} rounded-lg bg-[#1a1412]/60 hover:bg-[#3a2c24] text-stone-400 hover:text-amber-300 transition-all`}
                 title="Münze duplizieren / kopieren"
               >
                 <Copy className="w-4 h-4" />
@@ -223,7 +227,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
         </div>
 
         {/* Center Coin Visual Header */}
-        <div className="flex items-center gap-3.5 mb-3.5">
+        <div className="flex items-center gap-3.5 mb-2.5 sm:mb-3.5">
           <div className="relative shrink-0 group/imgContainer">
             <div className="relative">
               <CoinAvatar
@@ -234,7 +238,8 @@ export const CoinCard: React.FC<CoinCardProps> = ({
                 material={coin.material}
                 isBanknote={isBanknote}
                 size="md"
-                className={isBanknote ? '!object-contain !object-center' : '!aspect-square !rounded-full !object-contain !object-center'}
+                containImage={!isBanknote}
+                className={isBanknote ? '!object-cover !object-center' : '!aspect-square !rounded-full'}
                 onClick={() => hasBothImages && setShowReverse(!showReverse)}
               />
               {hasBothImages && (
@@ -260,7 +265,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           </div>
 
           <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-slate-100 text-sm sm:text-base leading-snug line-clamp-2 group-hover:text-amber-300 transition-colors">
+            <h3 className="break-words font-bold text-slate-100 text-sm sm:text-base leading-snug line-clamp-2 group-hover:text-amber-300 transition-colors">
               {getCoinTitle(coin)}
             </h3>
 
@@ -279,7 +284,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
         </div>
 
         {/* Specs Pill Badges */}
-        <div className="flex flex-wrap gap-1.5 mb-3 text-[11px] text-slate-400">
+        <div className="flex flex-wrap gap-x-1.5 gap-y-1 mb-2 text-[11px] text-slate-400 sm:gap-y-1.5 sm:mb-3">
           {/* Item Type Badge */}
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold border ${
             isBanknote ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
@@ -315,7 +320,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           {coin.isSold ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
               <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span>Verkauft ({formatCurrency(coin.soldPrice || coin.currentValue)})</span>
+              <span>Verkauft ({formatCurrency(coin.soldPrice ?? coin.currentValue)})</span>
             </span>
           ) : coin.isForSale ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-semibold" title={coin.listingUrl ? 'Zum Angebot verlinkt' : ''}>
@@ -336,16 +341,16 @@ export const CoinCard: React.FC<CoinCardProps> = ({
       </div>
 
       {/* Pricing & ROI Footer */}
-      <div className="pt-3 border-t border-slate-800/80 mt-1">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div>
+      <div className="pt-2 border-t border-slate-800/80 mt-0.5 sm:pt-3 sm:mt-1">
+        <div className="grid grid-cols-2 gap-2 mb-2 sm:mb-3">
+          <div className="min-w-0">
             <div className="text-[10px] uppercase font-semibold text-slate-400">Kaufpreis</div>
             <div className="font-mono text-xs text-slate-300">
               {formatCurrency(coin.purchasePrice)}
             </div>
           </div>
 
-          <div className="text-right">
+          <div className="min-w-0 text-right">
             <div className="text-[10px] uppercase font-semibold text-amber-400/90">Aktueller Wert</div>
             <div className="font-mono text-sm font-bold text-amber-300">
               {formatCurrency(coin.currentValue)}
@@ -354,19 +359,21 @@ export const CoinCard: React.FC<CoinCardProps> = ({
         </div>
 
         {/* Profitability Bar */}
-        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs font-mono mb-3">
+        <div className="flex min-w-0 flex-col items-start gap-1 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800 text-xs font-mono mb-2 sm:py-1.5 sm:mb-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
           <span className="text-[11px] text-slate-400 font-sans">Gewinn / Verlust:</span>
-          <span className={`font-bold flex items-center gap-1 ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-            {isPositive ? '+' : ''}{formatCurrency(profit)} ({profitMargin.toFixed(1)}%)
-          </span>
+          {hasCurrentValue ? (
+            <span className={`min-w-0 flex flex-wrap items-center gap-1 break-words font-bold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {isPositive ? <TrendingUp className="w-3.5 h-3.5 shrink-0" /> : <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
+              {isPositive ? '+' : ''}{formatCurrency(profit)} ({profitMargin.toFixed(1)}%)
+            </span>
+          ) : <span className="text-slate-500">Nicht angegeben</span>}
         </div>
 
         {/* Action Controls */}
-        <div className="grid grid-cols-4 gap-1 pt-1">
+        <div className="grid grid-cols-4 gap-1 pt-0.5 sm:pt-1">
           <button
             onClick={() => onViewDetails(coin)}
-            className="flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-amber-300 border border-slate-700/60 transition-colors"
+            className="flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-amber-300 border border-slate-700/60 transition-colors sm:py-1.5"
             title="Details"
           >
             <Eye className="w-3.5 h-3.5" />
@@ -374,7 +381,7 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           </button>
           <button
             onClick={() => onEdit(coin)}
-            className="flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-amber-300 border border-slate-700/60 transition-colors"
+            className="flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-amber-300 border border-slate-700/60 transition-colors sm:py-1.5"
             title="Bearbeiten"
           >
             <Edit2 className="w-3.5 h-3.5" />
@@ -383,16 +390,16 @@ export const CoinCard: React.FC<CoinCardProps> = ({
           {onDuplicate && (
             <button
               onClick={() => onDuplicate(coin)}
-              className="flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg bg-slate-800/80 hover:bg-amber-950/60 text-xs font-medium text-slate-300 hover:text-amber-300 border border-slate-700/60 hover:border-amber-700/50 transition-colors"
+              className="flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-slate-800/80 hover:bg-amber-950/60 text-xs font-medium text-slate-300 hover:text-amber-300 border border-slate-700/60 hover:border-amber-700/50 transition-colors sm:py-1.5"
               title="Kopieren / Duplizieren"
             >
               <Copy className="w-3.5 h-3.5 text-amber-400" />
-              {isIos ? <span className="text-[10px]">Duplizieren</span> : <span className="hidden sm:inline">Kopie</span>}
+              {isIos ? <span className="hidden text-[10px] min-[380px]:inline">Duplizieren</span> : <span className="hidden sm:inline">Kopie</span>}
             </button>
           )}
           <button
             onClick={() => onDelete(coin.id)}
-            className="flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-950/60 text-xs font-medium text-slate-400 hover:text-rose-300 border border-slate-700/60 hover:border-rose-800/50 transition-colors"
+            className="flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-950/60 text-xs font-medium text-slate-400 hover:text-rose-300 border border-slate-700/60 hover:border-rose-800/50 transition-colors sm:py-1.5"
             title="Löschen"
           >
             <Trash2 className="w-3.5 h-3.5" />

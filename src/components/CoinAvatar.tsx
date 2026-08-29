@@ -10,6 +10,7 @@ interface CoinAvatarProps {
   material?: string;
   isBanknote?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  containImage?: boolean;
   className?: string;
   onClick?: () => void;
   altText?: string;
@@ -23,6 +24,7 @@ export const CoinAvatar: React.FC<CoinAvatarProps> = ({
   material = '',
   isBanknote = false,
   size = 'md',
+  containImage = false,
   className = '',
   onClick,
   altText
@@ -51,6 +53,31 @@ export const CoinAvatar: React.FC<CoinAvatarProps> = ({
   const hasValidImage = Boolean(formattedUrl && formattedUrl.trim() !== '' && !imageError);
 
   if (hasValidImage) {
+    const frameClasses = `${
+      isBanknote
+        ? 'border-emerald-500/60 shadow-emerald-950/40'
+        : 'border-amber-500/50 shadow-amber-950/40'
+    } ${sizeClasses[size]} ${className}`;
+
+    if (containImage && !isBanknote) {
+      return (
+        <div
+          onClick={onClick}
+          className={`shrink-0 overflow-hidden border-2 shadow-lg transition-all duration-300 ${frameClasses}`}
+        >
+          <img
+            src={formattedUrl}
+            alt={altText || name}
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+            className="h-full w-full object-contain object-center"
+          />
+        </div>
+      );
+    }
+
     return (
       <img
         src={formattedUrl}
@@ -60,11 +87,7 @@ export const CoinAvatar: React.FC<CoinAvatarProps> = ({
         referrerPolicy="no-referrer"
         onError={() => setImageError(true)}
         onClick={onClick}
-        className={`object-cover border-2 shadow-lg transition-all duration-300 ${
-          isBanknote
-            ? 'border-emerald-500/60 shadow-emerald-950/40'
-            : 'border-amber-500/50 shadow-amber-950/40'
-        } ${sizeClasses[size]} ${className}`}
+        className={`object-cover border-2 shadow-lg transition-all duration-300 ${frameClasses}`}
       />
     );
   }
