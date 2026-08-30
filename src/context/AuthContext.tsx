@@ -9,6 +9,7 @@ import {
   reauthenticateWithPopup,
   sendPasswordResetEmail,
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithCredential,
   signInWithPopup, 
   signOut 
@@ -16,6 +17,7 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, googleProvider } from '../lib/firebase';
+import { deleteTestAppleAccountOnServer } from '../utils/accountDeletionApi';
 import { deleteAllUserDataFromFirestore } from '../utils/firestoreStorage';
 
 export interface AppUser {
@@ -126,6 +128,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         await reauthenticateWithPopup(currentUser, googleProvider);
       }
+    } else if (providerIds.includes('apple.com')) {
+      if (Capacitor.getPlatform() !== 'ios') {
+        throw new Error('auth/unsupported-provider');
+      }
+      const originalUid = currentUser.uid;
+      const result = await FirebaseAuthentication.signInWithApple({ skipNativeAuth: true });
+      const identityToken = result.credential?.idToken ?? null;
+      const rawNonce = result.credential?.nonce ?? null;
+      const authorizationCode = result.credential?.authorizationCode ?? null;
+      if (!identityToken || !rawNonce || !authorizationCode) {
+        throw new Error('auth/missing-apple-credential');
+      }
+      const appleProvider = new OAuthProvider('apple.com');
+      const credential = appleProvider.credential({ idToken: identityToken, rawNonce });
+      const reauthenticatedUser = await reauthenticateWithCredential(currentUser, credential);
+      if (reauthenticatedUser.user.uid !== originalUid) {
+        throw new Error('auth/user-mismatch');
+      }
+      const freshFirebaseIdToken = await reauthenticatedUser.user.getIdToken(true);
+      await deleteTestAppleAccountOnServer(freshFirebaseIdToken, authorizationCode);
+      await signOut(auth);
+      return;
     } else {
       throw new Error('auth/unsupported-provider');
     }

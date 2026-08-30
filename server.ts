@@ -1,13 +1,47 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import {
+  createPrivateKey,
+  createPublicKey,
+  randomUUID,
+  sign as cryptoSign,
+  verify as cryptoVerify,
+} from "crypto";
+import type { JsonWebKey as NodeJsonWebKey } from "crypto";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { applicationDefault, getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import type { NextFunction, Request, Response } from "express";
+import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
+
+class AccountDeletionError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+    this.name = "AccountDeletionError";
+  }
+}
+
+type AppleJwk = {
+  [key: string]: string | undefined;
+  kid: string;
+  kty: "RSA";
+  n: string;
+  e: string;
+};
+
+type AppleTokenResponse = {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  id_token?: unknown;
+};
 
 async function startServer() {
   const app = express();
@@ -15,6 +49,12 @@ async function startServer() {
   const GOOGLE_DESKTOP_CLIENT_ID = "211237775065-c5l25t57c5oe9bl02gkl2p93qq0mchok.apps.googleusercontent.com";
   const desktopOAuthAttempts = new Map<string, { count: number; resetAt: number }>();
   const maxAiImageBytes = 8 * 1024 * 1024;
+  const appleRequestTimeoutMs = 10_000;
+  const appleJwksTimeoutMs = 5_000;
+  const appleFreshAuthMaxAgeSeconds = 5 * 60;
+  const appleTestClientId = "com.alaniselin.numisma.test";
+  const appleAccountDeletionAttempts = new Map<string, { count: number; resetAt: number }>();
+  let appleJwksCache: { keys: AppleJwk[]; expiresAt: number } | null = null;
   const aiAllowedOrigins = new Set([
     "http://localhost:3000",
     "https://localhost",
@@ -30,6 +70,266 @@ async function startServer() {
       details.code = String(error.code);
     }
     return details;
+  }
+
+  function accountDeletionError(error: unknown): AccountDeletionError {
+    if (error instanceof AccountDeletionError) return error;
+    return new AccountDeletionError(500, "account-deletion/internal-error");
+  }
+
+  function applyAccountDeletionCors(req: Request, res: Response, next: NextFunction) {
+    const origin = req.get("origin");
+    if (origin && !aiAllowedOrigins.has(origin)) {
+      return res.status(403).json({ error: "auth/origin-not-allowed" });
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Pragma", "no-cache");
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  }
+
+  function requiredAppleConfiguration() {
+    const teamId = process.env.APPLE_TEAM_ID;
+    const keyId = process.env.APPLE_KEY_ID;
+    const clientId = process.env.APPLE_CLIENT_ID_TEST;
+    const privateKeyPath = process.env.APPLE_PRIVATE_KEY_PATH;
+    if (!teamId || !keyId || clientId !== appleTestClientId || !privateKeyPath) {
+      throw new AccountDeletionError(503, "account-deletion/server-not-configured");
+    }
+
+    let privateKeyPem: string;
+    try {
+      privateKeyPem = fs.readFileSync(privateKeyPath, "utf8");
+      if (!privateKeyPem.includes("BEGIN PRIVATE KEY") || privateKeyPem.length > 20_000) {
+        throw new Error("Invalid private key file");
+      }
+    } catch {
+      throw new AccountDeletionError(503, "account-deletion/server-not-configured");
+    }
+
+    return { teamId, keyId, clientId, privateKeyPem };
+  }
+
+  function createAppleClientSecret(config: ReturnType<typeof requiredAppleConfiguration>): string {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const encodedHeader = Buffer.from(JSON.stringify({ alg: "ES256", kid: config.keyId })).toString("base64url");
+    const encodedPayload = Buffer.from(JSON.stringify({
+      iss: config.teamId,
+      iat: issuedAt,
+      exp: issuedAt + 5 * 60,
+      aud: "https://appleid.apple.com",
+      sub: config.clientId,
+    })).toString("base64url");
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+
+    try {
+      const signature = cryptoSign("sha256", Buffer.from(signingInput), {
+        key: createPrivateKey(config.privateKeyPem),
+        dsaEncoding: "ieee-p1363",
+      }).toString("base64url");
+      return `${signingInput}.${signature}`;
+    } catch {
+      throw new AccountDeletionError(503, "account-deletion/server-not-configured");
+    }
+  }
+
+  async function getAppleJwks(): Promise<AppleJwk[]> {
+    if (appleJwksCache && appleJwksCache.expiresAt > Date.now()) {
+      return appleJwksCache.keys;
+    }
+
+    let response: globalThis.Response;
+    try {
+      response = await fetch("https://appleid.apple.com/auth/keys", {
+        signal: AbortSignal.timeout(appleJwksTimeoutMs),
+      });
+    } catch (error) {
+      const status = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? 504 : 502;
+      throw new AccountDeletionError(status, "account-deletion/apple-keys-unavailable");
+    }
+    if (!response.ok) {
+      throw new AccountDeletionError(502, "account-deletion/apple-keys-unavailable");
+    }
+
+    let keys: AppleJwk[];
+    try {
+      const payload = await response.json() as { keys?: unknown };
+      if (!Array.isArray(payload.keys)) throw new Error("Missing Apple keys");
+      keys = payload.keys.filter((key): key is AppleJwk => {
+        if (typeof key !== "object" || key === null) return false;
+        const candidate = key as Record<string, unknown>;
+        return candidate.kty === "RSA" &&
+          typeof candidate.kid === "string" &&
+          typeof candidate.n === "string" &&
+          typeof candidate.e === "string";
+      });
+      if (keys.length === 0) throw new Error("Missing usable Apple keys");
+    } catch {
+      throw new AccountDeletionError(502, "account-deletion/apple-keys-invalid");
+    }
+
+    appleJwksCache = { keys, expiresAt: Date.now() + 60 * 60 * 1000 };
+    return keys;
+  }
+
+  function validateAppleIdentityToken(
+    idToken: string,
+    keys: AppleJwk[],
+    clientId: string,
+    expectedAppleSubject: string,
+  ): void {
+    try {
+      const parts = idToken.split(".");
+      if (parts.length !== 3) throw new Error("Invalid token format");
+      const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
+      const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
+      if (header.alg !== "RS256" || typeof header.kid !== "string") throw new Error("Invalid token header");
+      const matchingKey = keys.find(key => key.kid === header.kid);
+      if (!matchingKey) throw new Error("Unknown signing key");
+
+      const signatureValid = cryptoVerify(
+        "RSA-SHA256",
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        createPublicKey({ key: matchingKey as NodeJsonWebKey, format: "jwk" }),
+        Buffer.from(parts[2], "base64url"),
+      );
+      const now = Math.floor(Date.now() / 1000);
+      const audienceValid = claims.aud === clientId || (Array.isArray(claims.aud) && claims.aud.includes(clientId));
+      const issuedAtValid = typeof claims.iat === "number" && claims.iat <= now + 60;
+      const expiryValid = typeof claims.exp === "number" && claims.exp > now;
+      if (
+        !signatureValid ||
+        claims.iss !== "https://appleid.apple.com" ||
+        !audienceValid ||
+        !issuedAtValid ||
+        !expiryValid ||
+        claims.sub !== expectedAppleSubject
+      ) {
+        throw new Error("Invalid token claims");
+      }
+    } catch {
+      throw new AccountDeletionError(403, "account-deletion/apple-identity-mismatch");
+    }
+  }
+
+  async function exchangeAppleAuthorizationCode(
+    authorizationCode: string,
+    config: ReturnType<typeof requiredAppleConfiguration>,
+    clientSecret: string,
+  ): Promise<{ idToken: string; token: string; tokenTypeHint: "refresh_token" | "access_token" }> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch("https://appleid.apple.com/auth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: config.clientId,
+          client_secret: clientSecret,
+          code: authorizationCode,
+          grant_type: "authorization_code",
+        }),
+        signal: AbortSignal.timeout(appleRequestTimeoutMs),
+      });
+    } catch (error) {
+      const status = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? 504 : 502;
+      throw new AccountDeletionError(status, "account-deletion/apple-token-unavailable");
+    }
+    if (!response.ok) {
+      const status = response.status >= 400 && response.status < 500 ? 400 : 502;
+      throw new AccountDeletionError(status, "account-deletion/apple-token-rejected");
+    }
+
+    let tokenResponse: AppleTokenResponse;
+    try {
+      tokenResponse = await response.json() as AppleTokenResponse;
+    } catch {
+      throw new AccountDeletionError(502, "account-deletion/apple-token-invalid");
+    }
+    const idToken = typeof tokenResponse.id_token === "string" ? tokenResponse.id_token : null;
+    const refreshToken = typeof tokenResponse.refresh_token === "string" ? tokenResponse.refresh_token : null;
+    const accessToken = typeof tokenResponse.access_token === "string" ? tokenResponse.access_token : null;
+    if (!idToken || (!refreshToken && !accessToken)) {
+      throw new AccountDeletionError(502, "account-deletion/apple-token-invalid");
+    }
+    return refreshToken
+      ? { idToken, token: refreshToken, tokenTypeHint: "refresh_token" }
+      : { idToken, token: accessToken as string, tokenTypeHint: "access_token" };
+  }
+
+  async function revokeAppleToken(
+    token: string,
+    tokenTypeHint: "refresh_token" | "access_token",
+    config: ReturnType<typeof requiredAppleConfiguration>,
+    clientSecret: string,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch("https://appleid.apple.com/auth/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: config.clientId,
+            client_secret: clientSecret,
+            token,
+            token_type_hint: tokenTypeHint,
+          }),
+          signal: AbortSignal.timeout(appleRequestTimeoutMs),
+        });
+        if (response.ok) return;
+        if (response.status >= 500 && attempt === 0) continue;
+        const status = response.status >= 400 && response.status < 500 ? 400 : 502;
+        throw new AccountDeletionError(status, "account-deletion/apple-revoke-rejected");
+      } catch (error) {
+        if (error instanceof AccountDeletionError) throw error;
+        if (attempt === 0) continue;
+        const status = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? 504 : 502;
+        throw new AccountDeletionError(status, "account-deletion/apple-revoke-unavailable");
+      }
+    }
+    throw new AccountDeletionError(502, "account-deletion/apple-revoke-unavailable");
+  }
+
+  function enforceAccountDeletionRateLimit(uid: string, remoteAddress: string | undefined): void {
+    const now = Date.now();
+    const key = `${uid}:${remoteAddress || "unknown"}`;
+    const current = appleAccountDeletionAttempts.get(key);
+    const limit = !current || current.resetAt <= now
+      ? { count: 1, resetAt: now + 15 * 60 * 1000 }
+      : { count: current.count + 1, resetAt: current.resetAt };
+    appleAccountDeletionAttempts.set(key, limit);
+
+    if (appleAccountDeletionAttempts.size > 10_000) {
+      for (const [storedKey, value] of appleAccountDeletionAttempts) {
+        if (value.resetAt <= now) appleAccountDeletionAttempts.delete(storedKey);
+      }
+    }
+    if (limit.count > 3) {
+      throw new AccountDeletionError(429, "account-deletion/rate-limited");
+    }
+  }
+
+  async function withAccountDeletionTimeout<T>(
+    operation: Promise<T>,
+    timeoutMs: number,
+    code: string,
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new AccountDeletionError(504, code)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
   }
 
   function applyAiCors(req: Request, res: Response, next: NextFunction) {
@@ -186,6 +486,114 @@ async function startServer() {
           ? "oauth/google-timeout"
           : "oauth/google-unavailable";
         return res.status(502).json({ error: errorCode });
+      }
+    },
+  );
+
+  app.options("/api/account/apple/delete/test", applyAccountDeletionCors);
+  app.post(
+    "/api/account/apple/delete/test",
+    applyAccountDeletionCors,
+    express.json({ limit: "8kb", type: "application/json" }),
+    async (req, res) => {
+      const requestId = randomUUID();
+      let stage = "firebase_verification";
+      try {
+        const authorization = req.get("authorization") || "";
+        const match = authorization.match(/^Bearer ([^\s]+)$/);
+        if (!match || match[1].length > 8192) {
+          throw new AccountDeletionError(401, "auth/missing-token");
+        }
+
+        const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
+        const adminAuth = getAdminAuth(adminApp);
+        let decodedToken: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
+        try {
+          decodedToken = await withAccountDeletionTimeout(
+            adminAuth.verifyIdToken(match[1], true),
+            15_000,
+            "auth/verification-timeout",
+          );
+        } catch (error) {
+          if (error instanceof AccountDeletionError) throw error;
+          throw new AccountDeletionError(401, "auth/invalid-token");
+        }
+        const now = Math.floor(Date.now() / 1000);
+        if (
+          typeof decodedToken.auth_time !== "number" ||
+          decodedToken.auth_time > now + 60 ||
+          now - decodedToken.auth_time > appleFreshAuthMaxAgeSeconds
+        ) {
+          throw new AccountDeletionError(401, "auth/recent-login-required");
+        }
+        if (decodedToken.firebase?.sign_in_provider !== "apple.com") {
+          throw new AccountDeletionError(403, "auth/apple-provider-required");
+        }
+
+        stage = "firebase_user_verification";
+        let firebaseUser: Awaited<ReturnType<typeof adminAuth.getUser>>;
+        try {
+          firebaseUser = await withAccountDeletionTimeout(
+            adminAuth.getUser(decodedToken.uid),
+            15_000,
+            "auth/user-verification-timeout",
+          );
+        } catch (error) {
+          if (error instanceof AccountDeletionError) throw error;
+          throw new AccountDeletionError(401, "auth/invalid-user");
+        }
+        const appleProvider = firebaseUser.providerData.find(provider => provider.providerId === "apple.com");
+        if (!appleProvider?.uid) {
+          throw new AccountDeletionError(403, "auth/apple-provider-required");
+        }
+        enforceAccountDeletionRateLimit(decodedToken.uid, req.socket.remoteAddress);
+
+        const authorizationCode = req.body?.authorizationCode;
+        if (typeof authorizationCode !== "string" || authorizationCode.length === 0 || authorizationCode.length > 4096) {
+          throw new AccountDeletionError(400, "account-deletion/invalid-request");
+        }
+
+        stage = "apple_configuration";
+        const appleConfig = requiredAppleConfiguration();
+        const clientSecret = createAppleClientSecret(appleConfig);
+
+        stage = "apple_keys";
+        const appleKeys = await getAppleJwks();
+
+        stage = "apple_token_exchange";
+        const appleTokens = await exchangeAppleAuthorizationCode(authorizationCode, appleConfig, clientSecret);
+
+        stage = "apple_identity_validation";
+        validateAppleIdentityToken(appleTokens.idToken, appleKeys, appleConfig.clientId, appleProvider.uid);
+
+        stage = "apple_token_revocation";
+        await revokeAppleToken(appleTokens.token, appleTokens.tokenTypeHint, appleConfig, clientSecret);
+
+        stage = "firestore_deletion";
+        const firestore = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+        await withAccountDeletionTimeout(
+          firestore.recursiveDelete(firestore.collection("users").doc(decodedToken.uid)),
+          45_000,
+          "account-deletion/firestore-timeout",
+        );
+
+        stage = "firebase_auth_deletion";
+        await withAccountDeletionTimeout(
+          adminAuth.deleteUser(decodedToken.uid),
+          15_000,
+          "account-deletion/firebase-auth-timeout",
+        );
+
+        console.info("Apple account deletion completed.", { requestId });
+        return res.status(200).json({ success: true });
+      } catch (error) {
+        const safeError = accountDeletionError(error);
+        console.warn("Apple account deletion failed.", {
+          requestId,
+          stage,
+          code: safeError.code,
+        });
+        return res.status(safeError.status).json({ error: safeError.code });
       }
     },
   );
