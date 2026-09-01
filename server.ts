@@ -490,6 +490,84 @@ async function startServer() {
     },
   );
 
+  app.options("/api/account/delete", applyAccountDeletionCors);
+  app.post(
+    "/api/account/delete",
+    applyAccountDeletionCors,
+    express.json({ limit: "8kb", type: "application/json" }),
+    async (req, res) => {
+      const requestId = randomUUID();
+      let stage = "firebase_verification";
+      try {
+        const authorization = req.get("authorization") || "";
+        const match = authorization.match(/^Bearer ([^\s]+)$/);
+        if (!match || match[1].length > 8192) {
+          throw new AccountDeletionError(401, "auth/missing-token");
+        }
+
+        const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
+        const adminAuth = getAdminAuth(adminApp);
+        let decodedToken: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
+        try {
+          decodedToken = await withAccountDeletionTimeout(
+            adminAuth.verifyIdToken(match[1], true),
+            15_000,
+            "auth/verification-timeout",
+          );
+        } catch (error) {
+          if (error instanceof AccountDeletionError) throw error;
+          throw new AccountDeletionError(401, "auth/invalid-token");
+        }
+        const now = Math.floor(Date.now() / 1000);
+        if (
+          typeof decodedToken.auth_time !== "number" ||
+          decodedToken.auth_time > now + 60 ||
+          now - decodedToken.auth_time > appleFreshAuthMaxAgeSeconds
+        ) {
+          throw new AccountDeletionError(401, "auth/recent-login-required");
+        }
+        enforceAccountDeletionRateLimit(decodedToken.uid, req.socket.remoteAddress);
+
+        stage = "firestore_deletion";
+        const firestore = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+        await withAccountDeletionTimeout(
+          firestore.recursiveDelete(firestore.collection("users").doc(decodedToken.uid)),
+          45_000,
+          "account-deletion/firestore-timeout",
+        );
+
+        stage = "firebase_auth_deletion";
+        await withAccountDeletionTimeout(
+          adminAuth.deleteUser(decodedToken.uid),
+          15_000,
+          "account-deletion/firebase-auth-timeout",
+        );
+
+        stage = "firebase_auth_postcondition";
+        try {
+          await withAccountDeletionTimeout(
+            adminAuth.getUser(decodedToken.uid),
+            15_000,
+            "account-deletion/postcondition-timeout",
+          );
+          throw new AccountDeletionError(502, "account-deletion/postcondition-failed");
+        } catch (error) {
+          if (error instanceof AccountDeletionError) throw error;
+          if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "auth/user-not-found") {
+            throw new AccountDeletionError(502, "account-deletion/postcondition-unavailable");
+          }
+        }
+
+        console.info("Firebase account deletion completed.", { requestId });
+        return res.status(200).json({ success: true });
+      } catch (error) {
+        const safeError = accountDeletionError(error);
+        console.warn("Firebase account deletion failed.", { requestId, stage, code: safeError.code });
+        return res.status(safeError.status).json({ error: safeError.code });
+      }
+    },
+  );
+
   app.options("/api/account/apple/delete/test", applyAccountDeletionCors);
   app.post(
     "/api/account/apple/delete/test",
