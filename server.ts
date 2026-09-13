@@ -16,6 +16,14 @@ import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import type { NextFunction, Request, Response } from "express";
 import firebaseConfig from "./firebase-applet-config.json";
+import { createAppleSignedTransactionVerifier } from "./src/server/appleSignedTransactionVerifier";
+import { readAppleSubscriptionConfiguration } from "./src/server/appleSubscriptionConfig";
+import {
+  createFirestoreAppleAccountTokenProvisioningStore,
+  createFirestoreAppleAccountTokenStore,
+} from "./src/server/firestoreAppleAccountTokenStore";
+import { createAppleSubscriptionRouter } from "./src/server/appleSubscriptionRouter";
+import { createAppleSubscriptionUnavailableRouter } from "./src/server/appleSubscriptionUnavailableRouter";
 
 dotenv.config();
 
@@ -675,6 +683,76 @@ async function startServer() {
       }
     },
   );
+
+  try {
+    const subscriptionConfiguration = readAppleSubscriptionConfiguration();
+    const rootCertificatePaths = (process.env.APPLE_ROOT_CERTIFICATE_PATHS || "")
+      .split(",")
+      .map(value => value.trim())
+      .filter(Boolean);
+    if (rootCertificatePaths.length === 0) {
+      throw new Error("Apple subscription roots are not configured.");
+    }
+    const appleRootCertificates = rootCertificatePaths.map(certificatePath => fs.readFileSync(certificatePath));
+    const verifier = createAppleSignedTransactionVerifier(
+      subscriptionConfiguration,
+      appleRootCertificates,
+    );
+    const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
+    const adminAuth = getAdminAuth(adminApp);
+    const firestore = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+    const tokenDocument = (firebaseUid: string) => firestore.collection("users").doc(firebaseUid);
+    const tokenField = "appleAppAccountToken";
+
+    app.use("/api/subscription/apple", createAppleSubscriptionRouter({
+      allowedOrigins: aiAllowedOrigins,
+      desktopEntitlement: {
+        firebaseAuth: adminAuth,
+        expectedEnvironment: subscriptionConfiguration.environment,
+        now: () => new Date(),
+        entitlements: {
+          async getForFirebaseUid(firebaseUid) {
+            const snapshot = await tokenDocument(firebaseUid).get();
+            return snapshot.exists ? snapshot.get("appleProEntitlement") : null;
+          },
+        },
+      },
+      accountToken: {
+        firebaseAuth: adminAuth,
+        accountTokens: createFirestoreAppleAccountTokenProvisioningStore({
+          documentForFirebaseUid: tokenDocument,
+          tokenField,
+          runTransaction: operation => firestore.runTransaction(operation),
+        }),
+      },
+      entitlement: {
+        firebaseAuth: adminAuth,
+        entitlement: {
+          expectedEnvironment: subscriptionConfiguration.environment,
+          now: () => new Date(),
+          accountTokens: createFirestoreAppleAccountTokenStore({
+            documentForFirebaseUid: tokenDocument,
+            tokenField,
+          }),
+          entitlements: {
+            async recordForFirebaseUid(firebaseUid, entitlement) {
+              await tokenDocument(firebaseUid).set(
+                { appleProEntitlement: entitlement },
+                { merge: true },
+              );
+            },
+          },
+          verifier,
+        },
+      },
+    }));
+  } catch {
+    console.warn("Apple subscription endpoints are unavailable because server configuration is incomplete.");
+    app.use(
+      "/api/subscription/apple",
+      createAppleSubscriptionUnavailableRouter({ allowedOrigins: aiAllowedOrigins }),
+    );
+  }
 
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));

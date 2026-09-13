@@ -46,8 +46,19 @@ import {
   reserveNextCatalogNumberForUser
 } from './utils/firestoreStorage';
 import { useAuth } from './context/AuthContext';
+import { auth } from './lib/firebase';
+import { createAppleProSubscriptionActions } from './utils/appleProPurchaseDependencies';
+import type { AppleProProductId } from './utils/appleProPurchaseCoordinator';
+import type { AppleStoreKitProductPresentation } from './utils/appleStoreKit';
 
 import { Header } from './components/Header';
+import { ProSubscriptionModal } from './components/ProSubscriptionModal';
+
+const appleProSubscriptionActions = createAppleProSubscriptionActions(async forceRefresh => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('subscription/auth-required');
+  return currentUser.getIdToken(forceRefresh);
+});
 import { BottomNav } from './components/BottomNav';
 import { Dashboard } from './components/Dashboard';
 import { CoinList } from './components/CoinList';
@@ -86,6 +97,11 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isLogoModalOpen, setIsLogoModalOpen] = useState<boolean>(false);
   const [isHeroModalOpen, setIsHeroModalOpen] = useState<boolean>(false);
+  const [isProModalOpen, setIsProModalOpen] = useState<boolean>(false);
+  const [proProducts, setProProducts] = useState<AppleStoreKitProductPresentation[]>([]);
+  const [isProLoading, setIsProLoading] = useState<boolean>(false);
+  const [isProBusy, setIsProBusy] = useState<boolean>(false);
+  const [proError, setProError] = useState<string | null>(null);
   const [importToast, setImportToast] = useState<string | null>(null);
   const [isFetchingWebhooks, setIsFetchingWebhooks] = useState<boolean>(false);
   const webhookImportRunningRef = useRef(false);
@@ -982,6 +998,49 @@ export default function App() {
     }
   };
 
+  const handleOpenProModal = async () => {
+    setIsProModalOpen(true);
+    setProError(null);
+    setIsProLoading(true);
+    try {
+      setProProducts(await appleProSubscriptionActions.listProducts());
+    } catch {
+      setProError('Die App-Store-Angebote konnten nicht geladen werden.');
+    } finally {
+      setIsProLoading(false);
+    }
+  };
+
+  const handlePurchasePro = async (productId: AppleProProductId) => {
+    setIsProBusy(true);
+    setProError(null);
+    try {
+      const entitlement = await appleProSubscriptionActions.purchase(productId);
+      if (!entitlement.active) throw new Error('subscription/inactive');
+      setIsProModalOpen(false);
+      setImportToast('INUMIS Pro ist aktiv.');
+    } catch {
+      setProError('Der Kauf konnte nicht bestätigt werden. Es wurde nichts freigeschaltet.');
+    } finally {
+      setIsProBusy(false);
+    }
+  };
+
+  const handleRestorePro = async () => {
+    setIsProBusy(true);
+    setProError(null);
+    try {
+      const entitlement = await appleProSubscriptionActions.restore();
+      if (!entitlement.active) throw new Error('subscription/inactive');
+      setIsProModalOpen(false);
+      setImportToast('INUMIS Pro wurde wiederhergestellt.');
+    } catch {
+      setProError('Es konnte kein aktives INUMIS-Pro-Abo wiederhergestellt werden.');
+    } finally {
+      setIsProBusy(false);
+    }
+  };
+
   // Total Collection Valuation KPI
   const totalValuation = coins.reduce((acc, c) => acc + (c.currentValue || 0), 0);
 
@@ -1001,6 +1060,7 @@ export default function App() {
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenLogoModal={() => setIsLogoModalOpen(true)}
         onOpenHeroModal={() => setIsHeroModalOpen(true)}
+        onOpenProModal={isIos && user ? () => { void handleOpenProModal(); } : undefined}
         onManualFetchWebhooks={() => handleFetchPendingWebhooks(true)}
         isFetchingWebhooks={isFetchingWebhooks}
       />
@@ -1106,6 +1166,17 @@ export default function App() {
       />
 
       {/* Modals */}
+      <ProSubscriptionModal
+        isOpen={isProModalOpen}
+        products={proProducts}
+        loading={isProLoading}
+        busy={isProBusy}
+        error={proError}
+        onClose={() => setIsProModalOpen(false)}
+        onPurchase={productId => { void handlePurchasePro(productId); }}
+        onRestore={() => { void handleRestorePro(); }}
+      />
+
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}

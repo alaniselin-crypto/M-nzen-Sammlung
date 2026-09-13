@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Coins, HelpCircle, Folder, ShoppingBag, Cloud, UserCheck, DownloadCloud, Settings, ChevronDown, LogIn } from 'lucide-react';
+import { Coins, HelpCircle, Folder, ShoppingBag, Cloud, UserCheck, DownloadCloud, Settings, ChevronDown, LogIn, Crown } from 'lucide-react';
 import { formatCurrency } from '../utils/storage';
 import { useAuth } from '../context/AuthContext';
 
@@ -13,6 +13,7 @@ interface HeaderProps {
   onOpenAuthModal?: () => void;
   onOpenLogoModal?: () => void;
   onOpenHeroModal?: () => void;
+  onOpenProModal?: () => void;
   onManualFetchWebhooks?: () => void;
   isFetchingWebhooks?: boolean;
 }
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   onOpenLogoModal,
   onOpenHeroModal,
+  onOpenProModal,
   onManualFetchWebhooks,
   isFetchingWebhooks
 }) => {
@@ -137,6 +139,22 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Werkzeuge & Optionen</span>
                   <Settings className="w-3.5 h-3.5 text-amber-400" />
                 </div>
+
+                {onOpenProModal && (
+                  <button
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onOpenProModal();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-300 hover:bg-[#322722] transition-colors text-left"
+                  >
+                    <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-medium">INUMIS Pro</div>
+                      <div className="text-[10px] text-stone-400">Abo wählen oder wiederherstellen</div>
+                    </div>
+                  </button>
+                )}
 
                 {onOpenFolderManager && (
                   <button
