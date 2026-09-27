@@ -782,7 +782,7 @@ async function startServer() {
       let contextText = `Du bist ein hochqualifizierter Numismatiker, Historiker und Experte für Münzen und Banknoten.
 
 STRENGSTE UND ABSOLUTE DIREKTIVE:
-Stütze dich EXKLUSIV und AUSSCHLIESSLICH auf die visuellen Merkmale der beigefügten BILDER (Vorderseite / Avers UND Rückseite / Revers)!
+Identifiziere das Stück EXKLUSIV anhand der visuellen Merkmale der beigefügten BILDER (Vorderseite / Avers UND Rückseite / Revers). Leite Material, Seltenheit und Marktwert danach aus deinem numismatischen Katalogwissen über genau diesen erkannten Typ ab.
 IGNORIERE ALLE VORGEGEBENEN FORMULAR- UND TEXTFELDER VOLLSTÄNDIG!
 Achte besonders darauf, den Nennwert (z.B. '5' bei 5 Franken / 5 CHF, '2' bei 2 Fr., '20', etc.) und das Prägejahr (z.B. 1968, 1932, etc.) EXAKT von den Aufschriften und Prägungen auf dem Bild abzulesen.
 
@@ -790,8 +790,14 @@ Visuelle Pflichtkriterien:
 1. Nennwert & Währung: Lies die Ziffer und Währung direkt aus dem Münz-/Banknotenbild ab. Wenn '5 Fr.', '5 CHF' oder eine große '5' zu sehen ist, antworte mit faceValue: "5" und currency: "CHF" (oder entsprechende Währung). Übernimm NIEMALS pauschal '1'.
 2. Prägejahr (year): Lies die Jahreszahl exakt von der Münze/Banknote ab.
 3. Herkunftsland (country): Bestimme das Land anhand der Inschriften (z.B. 'HELVETIA', 'CONFEDERATIO HELVETICA' -> Schweiz, 'DEUTSCHES REICH' -> Deutschland, 'RZECZPOSPOLITA POLSKA' -> Polen) oder anhand des Wappens.
-4. Material (material): Bestimme das Metall (Silber, Gold, Kupfer-Nickel, Bronze) visuell aus Prägung und Farbe.
-5. Titel (title): Erstelle einen präzisen Titel nach dem Schema '[Nennwert] [Währung] [Land] [Jahr] [Motiv/Besonderheit]', z.B. '5 CHF Schweiz 1968 Helvetia' oder '5 Franken Schweiz 1932 Alphirt'.
+4. Material (material): Bestimme die genaue Legierung des erkannten Typs, bevorzugt als "Ag 835", "Au 900", "Cu-Ni", "Bronze", "Bimetall" usw.
+5. Münzzeichen (mintMark): Lies ein sichtbares Münzstättenzeichen ab (z.B. "A", "B", "D", "F"), sonst leer lassen.
+6. Gewicht (weight), Durchmesser (diameter), Auflage (mintage): Gib die offiziellen Katalogwerte für genau diesen Typ an. Wenn unsicher, leer lassen.
+7. Art (itemType): "coin" für Münzen, "banknote" für Banknoten.
+8. Erhaltung (condition): Schätze den sichtbaren Erhaltungsgrad zwingend als einen der Werte "PP", "stgl", "vz", "ss", "s", "ge".
+9. Seltenheit (rarity): Schätze die Seltenheit des exakten Typs/Jahrgangs/Münzzeichens zwingend als "A - Häufig", "B - Nicht häufig", "C - Knapp", "R - Selten", "RR - Sehr Selten" oder "RRR - Äusserst selten".
+10. Verkaufswert (currentValue): Schätze einen realistischen aktuellen Verkaufswert in CHF für den erkannten Typ und den sichtbaren Erhaltungsgrad. Gib ausschließlich eine nichtnegative Zahl ohne Währungssymbol zurück.
+11. Titel (title): Erstelle einen präzisen Titel nach dem Schema '[Nennwert] [Währung] [Land] [Jahr] [Motiv/Besonderheit]', z.B. '5 CHF Schweiz 1968 Helvetia' oder '5 Franken Schweiz 1932 Alphirt'.
 
 Erstelle deine Antwort im folgenden JSON-Format:
 {
@@ -801,6 +807,14 @@ Erstelle deine Antwort im folgenden JSON-Format:
   "faceValue": "5",
   "currency": "CHF",
   "material": "Silber",
+  "mintMark": "B",
+  "weight": "15 g",
+  "diameter": "31.45 mm",
+  "mintage": "1'000'000",
+  "itemType": "coin",
+  "condition": "ss",
+  "rarity": "A - Häufig",
+  "currentValue": 25,
   "description": "Präzise, strukturierte numismatische Beschreibung basierend auf den sichtbaren Avers- und Revers-Details, Inschriften, Wappen und historische Einordnung auf Deutsch."
 }`;
 
@@ -833,13 +847,32 @@ Erstelle deine Antwort im folgenden JSON-Format:
 
       try {
         const parsed = JSON.parse(responseText);
+        const rawCurrency = String(parsed.currency || "").trim();
+        const compactCurrency = rawCurrency.toUpperCase().replace(/[\s.]/g, "");
+        const normalizedCurrency = ["FR", "FRS", "SFR", "FRANKEN", "SCHWEIZERFRANKEN"].includes(compactCurrency)
+          ? "CHF"
+          : rawCurrency.toUpperCase();
+        const rawCurrentValue = parsed.currentValue ?? parsed.estimatedValue;
+        const normalizedCurrentValue = typeof rawCurrentValue === "number"
+          ? rawCurrentValue
+          : Number.parseFloat(String(rawCurrentValue ?? "").replace(/[^\d,.-]/g, "").replace(",", "."));
         return res.json({
           title: parsed.title || "",
           country: parsed.country || "",
           year: parsed.year || null,
           faceValue: parsed.faceValue || "",
-          currency: parsed.currency || "",
+          currency: normalizedCurrency,
           material: parsed.material || "",
+          mintMark: parsed.mintMark || "",
+          weight: parsed.weight || "",
+          diameter: parsed.diameter || "",
+          mintage: parsed.mintage || "",
+          itemType: parsed.itemType || "",
+          condition: parsed.condition || "",
+          rarity: parsed.rarity || "",
+          currentValue: Number.isFinite(normalizedCurrentValue) && normalizedCurrentValue >= 0
+            ? normalizedCurrentValue
+            : null,
           description: parsed.description || "",
         });
       } catch (e) {
