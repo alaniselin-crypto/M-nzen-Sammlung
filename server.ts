@@ -13,7 +13,7 @@ import OpenAI from "openai";
 import dotenv from "dotenv";
 import { applicationDefault, getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
-import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import type { NextFunction, Request, Response } from "express";
 import firebaseConfig from "./firebase-applet-config.json";
 
@@ -343,6 +343,7 @@ async function startServer() {
     }
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Expose-Headers", "X-AI-Quota-Limit, X-AI-Quota-Remaining");
     if (req.method === "OPTIONS") return res.status(204).end();
     next();
   }
@@ -358,6 +359,7 @@ async function startServer() {
       const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
       const decodedToken = await getAdminAuth(adminApp).verifyIdToken(match[1], true);
       res.locals.firebaseUid = decodedToken.uid;
+      res.locals.firebaseEmail = typeof decodedToken.email === "string" ? decodedToken.email : undefined;
       next();
     } catch (error) {
       console.warn("Firebase ID token verification failed.", safeErrorDetails(error));
@@ -730,8 +732,77 @@ async function startServer() {
   }
 
   // API Endpoint: AI Coin Title & Description Generation
+  // KI-Kontingent pro Benutzer und Kalendermonat (UTC): Gratis 30, Numismatik Pro 1000.
+  // Gezählt wird nur eine erfolgreiche Antwort. Ist Firestore nicht erreichbar, wird die KI nicht blockiert.
+  const AI_FREE_MONTHLY_LIMIT = 30;
+  const AI_PRO_MONTHLY_LIMIT = 1000;
+  const aiUnlimitedEmails = new Set(
+    (process.env.AI_UNLIMITED_EMAILS || "alan.iselin@live.com,alaniselin@gmail.com")
+      .split(",")
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  function aiQuotaFirestore() {
+    const adminApp = getApps()[0] || initializeAdminApp({ credential: applicationDefault() });
+    return getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+  }
+
+  function aiUsageDocument(uid: string, now = new Date()) {
+    return aiQuotaFirestore().collection("users").doc(uid).collection("aiUsage").doc(now.toISOString().slice(0, 7));
+  }
+
+  async function aiMonthlyLimitFor(uid: string, email: string | undefined): Promise<number | null> {
+    if (email && aiUnlimitedEmails.has(email.toLowerCase())) return null;
+    const snapshot = await aiQuotaFirestore().collection("users").doc(uid).get();
+    const entitlement = snapshot.exists ? snapshot.get("appleProEntitlement") : null;
+    const proActive = entitlement?.active === true
+      && typeof entitlement.expiresAt === "string"
+      && Date.parse(entitlement.expiresAt) > Date.now();
+    return proActive ? AI_PRO_MONTHLY_LIMIT : AI_FREE_MONTHLY_LIMIT;
+  }
+
+  async function enforceAiQuota(req: Request, res: Response, next: NextFunction) {
+    const uid = res.locals.firebaseUid;
+    if (typeof uid !== "string" || !uid) return res.status(401).json({ error: "auth/missing-token" });
+    let limit: number | null;
+    let used: number;
+    try {
+      limit = await aiMonthlyLimitFor(uid, res.locals.firebaseEmail);
+      const usage = await aiUsageDocument(uid).get();
+      const storedCount = usage.exists ? usage.get("count") : 0;
+      used = typeof storedCount === "number" && Number.isFinite(storedCount) ? storedCount : 0;
+    } catch (error) {
+      console.warn("AI quota could not be checked; allowing the request.", safeErrorDetails(error));
+      return next();
+    }
+
+    if (limit !== null && used >= limit) {
+      return res.status(429).json({
+        code: "ai/quota-exceeded",
+        limit,
+        used,
+        error: limit === AI_FREE_MONTHLY_LIMIT
+          ? `Sie haben Ihre ${AI_FREE_MONTHLY_LIMIT} kostenlosen KI-Erkennungen für diesen Monat aufgebraucht. Am 1. des nächsten Monats stehen wieder ${AI_FREE_MONTHLY_LIMIT} zur Verfügung. Mit Numismatik Pro erhalten Sie ${AI_PRO_MONTHLY_LIMIT} pro Monat.`
+          : `Das monatliche KI-Kontingent von ${AI_PRO_MONTHLY_LIMIT} Anfragen ist erreicht. Am 1. des nächsten Monats geht es weiter.`,
+      });
+    }
+
+    if (limit !== null) {
+      res.setHeader("X-AI-Quota-Limit", String(limit));
+      res.setHeader("X-AI-Quota-Remaining", String(Math.max(0, limit - used - 1)));
+    }
+    res.on("finish", () => {
+      if (res.statusCode !== 200) return;
+      aiUsageDocument(uid)
+        .set({ count: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+        .catch(error => console.warn("AI usage could not be recorded.", safeErrorDetails(error)));
+    });
+    next();
+  }
+
   app.options("/api/generate-coin-info", applyAiCors);
-  app.post("/api/generate-coin-info", applyAiCors, requireFirebaseUser, async (req, res) => {
+  app.post("/api/generate-coin-info", applyAiCors, requireFirebaseUser, enforceAiQuota, async (req, res) => {
     try {
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
